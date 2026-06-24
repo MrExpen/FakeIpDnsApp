@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+option csharp_namespace = "IpGrpcMap";
+
+package ipMap;
+
+service IpMapper {
+  // Sends a greeting
+  rpc MapIp (MapIpRequest) returns (MapIpReply);
+}
+
+message MapIpRequest {
+  bytes fakeIp = 1;
+  bytes realIp = 2;
+  uint32 ttl = 3;
+}
+
+message MapIpReply {
+}

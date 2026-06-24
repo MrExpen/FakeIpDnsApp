@@ -1,7 +1,5 @@
 ﻿using System;
 using System.Collections.Frozen;
-using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -10,6 +8,9 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using DnsServerCore.ApplicationCommon;
+using Google.Protobuf;
+using Grpc.Net.Client;
+using IpGrpcMap;
 using TechnitiumLibrary;
 using TechnitiumLibrary.Net.Dns;
 using TechnitiumLibrary.Net.Dns.ResourceRecords;
@@ -31,13 +32,11 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
 
     private bool EnabledHttps;
 
+    private string GrpcAgentAddress = null!;
+    private GrpcChannel? Channel;
+    private IpMapper.IpMapperClient IpMapper = null!;
+
     private bool IgnoreCase;
-
-    private string NftTableNameIpv4 = null!;
-    private string NftTableNameIpv6 = null!;
-    private string NftMapNameIpv4 = null!;
-    private string NftMapNameIpv6 = null!;
-
     private uint Ttl;
     private FrozenSet<string> Domains = null!;
     private FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> Lookup;
@@ -58,14 +57,12 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
 
         EnabledHttps = jsonConfig.GetPropertyValue("enabledHttps", true);
 
-        NftTableNameIpv4 = jsonConfig.GetPropertyValue("nftTableNameIpv4", "vpn");
-        NftTableNameIpv6 = jsonConfig.GetPropertyValue("nftTableNameIpv6", "vpn");
-
-        NftMapNameIpv4 = jsonConfig.GetPropertyValue("nftMapNameIpv4", "fakeip_map");
-        NftMapNameIpv6 = jsonConfig.GetPropertyValue("nftMapNameIpv6", "fakeip6_map");
+        GrpcAgentAddress = jsonConfig.GetPropertyValue("grpcAgentAddress", "http://127.0.0.1:5000");
+        Channel?.Dispose();
+        Channel = GrpcChannel.ForAddress(GrpcAgentAddress);
+        IpMapper = new IpMapper.IpMapperClient(Channel);
 
         Ttl = jsonConfig.GetPropertyValue("ttl", 3600u);
-
         IgnoreCase = jsonConfig.GetPropertyValue("ignoreCase", true);
         var domains = jsonConfig.ReadArray("domains");
 
@@ -106,34 +103,33 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
             return response;
         }
 
-        var originalAnswer = response.Answer[0];
         DnsResourceRecord answer;
 
         try
         {
             switch (question.Type)
             {
-                case DnsResourceRecordType.A when EnabledIpv4 && originalAnswer.RDATA is DnsARecordData ipv4RecordData:
+                case DnsResourceRecordType.A when EnabledIpv4 && response.Answer.Select(x => x.RDATA).OfType<DnsARecordData>().FirstOrDefault() is { } ipv4RecordData:
                     answer = new DnsResourceRecord(
                         domain,
                         DnsResourceRecordType.A,
                         DnsClass.IN,
                         Ttl,
-                        new DnsARecordData(await AllocateAndMapIpV4Address(ipv4RecordData.Address)));
+                        new DnsARecordData(await AllocateAndMapIpV4Address(ipv4RecordData.Address, Ttl)));
                     break;
 
                 case DnsResourceRecordType.AAAA
-                    when EnabledIpv6 && originalAnswer.RDATA is DnsARecordData ipv6RecordData:
+                    when EnabledIpv6 && response.Answer.Select(x => x.RDATA).OfType<DnsAAAARecordData>().FirstOrDefault() is { } ipv6RecordData:
                     answer = new DnsResourceRecord(
                         domain,
                         DnsResourceRecordType.AAAA,
                         DnsClass.IN,
                         Ttl,
-                        new DnsARecordData(await AllocateAndMapIpV6Address(ipv6RecordData.Address)));
+                        new DnsARecordData(await AllocateAndMapIpV6Address(ipv6RecordData.Address, Ttl)));
                     break;
 
                 case DnsResourceRecordType.HTTPS
-                    when EnabledHttps && originalAnswer.RDATA is DnsSVCBRecordData httpsRecord &&
+                    when EnabledHttps && response.Answer[0].RDATA is DnsSVCBRecordData httpsRecord &&
                          (httpsRecord.SvcParams.ContainsKey(DnsSvcParamKey.IPv4Hint) ||
                           httpsRecord.SvcParams.ContainsKey(DnsSvcParamKey.IPv6Hint)):
                     answer = new DnsResourceRecord(
@@ -214,24 +210,26 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
 
     private async Task<IPAddress> AllocateAndMapIpV4Address(
         IPAddress readIp,
+        uint ttl,
         CancellationToken cancellationToken = default
     )
     {
         var address = AllocateAddress(IpV4Range, ref IpV4Counter);
 
-        await MapFakeToRealIpAsync(address, readIp, cancellationToken);
+        await MapFakeToRealIpAsync(address, readIp, ttl, cancellationToken);
 
         return address;
     }
 
     private async Task<IPAddress> AllocateAndMapIpV6Address(
         IPAddress readIp,
+        uint ttl,
         CancellationToken cancellationToken = default
     )
     {
         var address = AllocateAddress(IpV6Range, ref IpV6Counter);
 
-        await MapFakeToRealIpAsync(address, readIp, cancellationToken);
+        await MapFakeToRealIpAsync(address, readIp, ttl, cancellationToken);
 
         return address;
     }
@@ -239,6 +237,7 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
     private async Task MapFakeToRealIpAsync(
         IPAddress fake,
         IPAddress real,
+        uint ttl,
         CancellationToken cancellationToken = default
     )
     {
@@ -247,32 +246,31 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
             throw new InvalidOperationException($"couldn't map {fake.AddressFamily} address with {real.AddressFamily}");
         }
 
-        IEnumerable<string> arguments = real.AddressFamily switch
+        await IpMapper.MapIpAsync(
+            new MapIpRequest { FakeIp = ToByteString(fake), RealIp = ToByteString(real), Ttl = ttl },
+            cancellationToken: cancellationToken);
+    }
+
+    private ByteString ToByteString(IPAddress address)
+    {
+        Span<byte> buffer = address.AddressFamily switch
         {
-            // TODO: ttl
-            AddressFamily.InterNetwork =>
-                ["add", "element", "ip", NftTableNameIpv4, NftMapNameIpv4, $"{{ {fake} : {real} }}"],
-
-            // TODO: ttl
-            AddressFamily.InterNetworkV6 =>
-                ["add", "element", "ip6", NftTableNameIpv6, NftMapNameIpv6, $"{{ {fake} : {real} }}"],
-
-            _ => throw new InvalidOperationException($"address family {real.AddressFamily} not supported")
+            AddressFamily.InterNetwork => stackalloc byte[4],
+            AddressFamily.InterNetworkV6 => stackalloc byte[16],
+            _ => throw new ArgumentOutOfRangeException()
         };
 
-        using var process = Process.Start("nft", arguments);
-
-        await process.WaitForExitAsync(cancellationToken);
-
-        if (process.ExitCode != 0)
+        if (!address.TryWriteBytes(buffer, out var written))
         {
-            throw new InvalidOperationException("couldn't map fake ip address");
+            throw new InvalidOperationException();
         }
+
+        return ByteString.CopyFrom(buffer);
     }
 
     public void Dispose()
     {
-        // Ignore
+        Channel?.Dispose();
     }
 
     public string Description => "Allocate ip for resources in fake range.";
