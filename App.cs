@@ -1,14 +1,13 @@
 ﻿using System;
 using System.Collections.Frozen;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
-using System.Net.Sockets;
-using System.Numerics;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using DnsServerCore.ApplicationCommon;
-using Google.Protobuf;
+using FakeIpRouting.Extensions;
 using Grpc.Net.Client;
 using IpGrpcMap;
 using TechnitiumLibrary;
@@ -22,15 +21,7 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
     private static readonly JsonDocumentOptions JsonParseOptions = new()
         { CommentHandling = JsonCommentHandling.Skip };
 
-    private bool EnabledIpv4;
-    private IPAddressRange IpV4Range = null!;
-    private long IpV4Counter;
-
-    private bool EnabledIpv6;
-    private IPAddressRange IpV6Range = null!;
-    private long IpV6Counter;
-
-    private bool EnabledHttps;
+    private bool Disable;
 
     private string GrpcAgentAddress = null!;
     private GrpcChannel? Channel;
@@ -38,24 +29,18 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
 
     private bool IgnoreCase;
     private uint Ttl;
-    private FrozenSet<string> Domains = null!;
-    private FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> Lookup;
+
+    private FrozenDictionary<string, int> DomainToRange = null!;
+    private FrozenDictionary<string, int>.AlternateLookup<ReadOnlySpan<char>> Lookup;
+
+    private List<RangeConfig> Configs = null!;
 
     public Task InitializeAsync(IDnsServer dnsServer, string? config)
     {
-        Interlocked.Exchange(ref IpV4Counter, 0);
-        Interlocked.Exchange(ref IpV6Counter, 0);
-
         using var jsonDocument = JsonDocument.Parse(config!, JsonParseOptions);
         var jsonConfig = jsonDocument.RootElement;
 
-        EnabledIpv4 = jsonConfig.GetPropertyValue("enabledIpv4", false);
-        IpV4Range = IPAddressRange.Parse(jsonConfig.GetPropertyValue("ipV4Range", "198.18.0.0/15"));
-
-        EnabledIpv6 = jsonConfig.GetPropertyValue("enabledIpv6", false);
-        IpV6Range = IPAddressRange.Parse(jsonConfig.GetPropertyValue("ipV6Range", "fc00::/106"));
-
-        EnabledHttps = jsonConfig.GetPropertyValue("enabledHttps", true);
+        Disable = jsonConfig.GetPropertyValue("disable", false);
 
         GrpcAgentAddress = jsonConfig.GetPropertyValue("grpcAgentAddress", "http://127.0.0.1:5000");
         Channel?.Dispose();
@@ -64,13 +49,51 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
 
         Ttl = jsonConfig.GetPropertyValue("ttl", 3600u);
         IgnoreCase = jsonConfig.GetPropertyValue("ignoreCase", true);
-        var domains = jsonConfig.ReadArray("domains");
 
-        Domains = IgnoreCase
-            ? domains.ToFrozenSet(StringComparer.OrdinalIgnoreCase)
-            : domains.ToFrozenSet();
+        var configs = new List<RangeConfig>();
+        var dictionary = IgnoreCase
+            ? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, int>();
 
-        Lookup = Domains.GetAlternateLookup<ReadOnlySpan<char>>();
+        foreach (var rangeConfig in jsonConfig.GetProperty("configs").EnumerateArray())
+        {
+            if (rangeConfig.GetPropertyValue("disabled", false))
+            {
+                continue;
+            }
+
+            var parsedConfig = new RangeConfig(
+                rangeConfig.GetPropertyValue("ipV4Range", null),
+                rangeConfig.GetPropertyValue("ipV6Range", null)
+            );
+
+            if (parsedConfig is { Ipv4Configured: false, Ipv6Configured: false })
+            {
+                continue;
+            }
+
+            var domains = rangeConfig.ReadArray("domains");
+
+            if (domains is null || domains.Length == 0)
+            {
+                continue;
+            }
+
+            configs.Add(parsedConfig);
+
+            foreach (var domain in domains)
+            {
+                dictionary.TryAdd(domain, configs.Count - 1);
+            }
+        }
+
+        Configs = configs;
+
+        DomainToRange = IgnoreCase
+            ? dictionary.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase)
+            : dictionary.ToFrozenDictionary();
+
+        Lookup = DomainToRange.GetAlternateLookup<ReadOnlySpan<char>>();
 
         return Task.CompletedTask;
     }
@@ -82,7 +105,7 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
         DnsDatagram response
     )
     {
-        if (!EnabledIpv4 && !EnabledIpv6)
+        if (Disable)
         {
             return response;
         }
@@ -94,11 +117,15 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
             response.Answer.Count == 0 ||
             question.Type is
                 not DnsResourceRecordType.A and
-                not DnsResourceRecordType.AAAA and
-                not DnsResourceRecordType.HTTPS ||
-            (question.Type == DnsResourceRecordType.A && !EnabledIpv4) ||
-            (question.Type == DnsResourceRecordType.AAAA && !EnabledIpv6) ||
-            !RuleExists(domain))
+                not DnsResourceRecordType.AAAA ||
+            !TryGetRangeIndex(domain, out var rangeIndex))
+        {
+            return response;
+        }
+
+        var config = GetRangeConfig(rangeIndex);
+
+        if (config is null)
         {
             return response;
         }
@@ -109,39 +136,29 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
         {
             switch (question.Type)
             {
-                case DnsResourceRecordType.A when EnabledIpv4 && response.Answer.Select(x => x.RDATA).OfType<DnsARecordData>().FirstOrDefault() is { } ipv4RecordData:
+                case DnsResourceRecordType.A when config.Ipv4Configured &&
+                                                  response.Answer.Select(x => x.RDATA).OfType<DnsARecordData>()
+                                                      .FirstOrDefault() is { } ipv4RecordData:
                     answer = new DnsResourceRecord(
                         domain,
                         DnsResourceRecordType.A,
                         DnsClass.IN,
                         Ttl,
-                        new DnsARecordData(await AllocateAndMapIpV4Address(ipv4RecordData.Address, Ttl)));
+                        new DnsARecordData(await AllocateAndMapIpAddress(config.Ipv4Allocator!, ipv4RecordData.Address,
+                            Ttl)));
                     break;
 
                 case DnsResourceRecordType.AAAA
-                    when EnabledIpv6 && response.Answer.Select(x => x.RDATA).OfType<DnsAAAARecordData>().FirstOrDefault() is { } ipv6RecordData:
+                    when config.Ipv6Configured &&
+                         response.Answer.Select(x => x.RDATA).OfType<DnsAAAARecordData>().FirstOrDefault() is
+                             { } ipv6RecordData:
                     answer = new DnsResourceRecord(
                         domain,
                         DnsResourceRecordType.AAAA,
                         DnsClass.IN,
                         Ttl,
-                        new DnsARecordData(await AllocateAndMapIpV6Address(ipv6RecordData.Address, Ttl)));
-                    break;
-
-                case DnsResourceRecordType.HTTPS
-                    when EnabledHttps && response.Answer[0].RDATA is DnsSVCBRecordData httpsRecord &&
-                         (httpsRecord.SvcParams.ContainsKey(DnsSvcParamKey.IPv4Hint) ||
-                          httpsRecord.SvcParams.ContainsKey(DnsSvcParamKey.IPv6Hint)):
-                    answer = new DnsResourceRecord(
-                        domain,
-                        DnsResourceRecordType.HTTPS,
-                        DnsClass.IN,
-                        Ttl,
-                        new DnsSVCBRecordData(httpsRecord.SvcPriority, httpsRecord.TargetName,
-                            httpsRecord.SvcParams
-                                .Where(x => x.Key != DnsSvcParamKey.IPv4Hint && x.Key != DnsSvcParamKey.IPv6Hint)
-                                .ToDictionary()));
-
+                        new DnsARecordData(await AllocateAndMapIpAddress(config.Ipv6Allocator!, ipv6RecordData.Address,
+                            Ttl)));
                     break;
 
                 default: return response;
@@ -154,80 +171,44 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
             return response;
         }
 
-
         return new DnsDatagram(response.Identifier, response.IsResponse, response.OPCODE,
             response.AuthoritativeAnswer, response.Truncation, response.RecursionDesired, response.RecursionAvailable,
             response.AuthenticData, response.CheckingDisabled, response.RCODE, response.Question, [answer],
             response.Authority, response.Additional);
     }
 
-    private bool RuleExists(ReadOnlySpan<char> domain)
+    private bool TryGetRangeIndex(string domain, out int rangeIndex)
     {
-        int indexOfDot = domain.Length;
-        do
+        foreach (var domainLevel in domain.EnumerateDomainLevels())
         {
-            indexOfDot = domain[..indexOfDot].LastIndexOf('.');
-            var currentDomain = domain[(indexOfDot + 1)..];
-
-            if (Lookup.Contains(currentDomain))
+            if (Lookup.TryGetValue(domainLevel, out rangeIndex))
             {
                 return true;
             }
-        } while (indexOfDot >= 0);
+        }
 
+        rangeIndex = -1;
         return false;
     }
 
-    private static IPAddress AllocateAddress(IPAddressRange range, ref long counter)
+    private RangeConfig? GetRangeConfig(int index)
     {
-        var addressIndex = Interlocked.Increment(ref counter) - 1;
-        addressIndex %= range.AddressCount;
-
-        if (addressIndex < 0)
+        if (index < 0 || index >= Configs.Count)
         {
-            addressIndex += range.AddressCount;
+            return null;
         }
 
-        return Add(range.Begin, addressIndex);
+        return Configs[index];
     }
 
-    private static IPAddress Add(IPAddress address, long value)
-    {
-        const int maxNeededBufferLength = 17;
-        Span<byte> buffer = stackalloc byte[maxNeededBufferLength];
-
-        if (!address.TryWriteBytes(buffer, out var written))
-        {
-            throw new InvalidOperationException("Недостижимая ошибка.");
-        }
-
-        // TODO optimize path for 32 and 128 bit
-        var ipAsInteger = new BigInteger(buffer[..written], isBigEndian: true) + value;
-        return !ipAsInteger.TryWriteBytes(buffer, out _, isBigEndian: true)
-            ? throw new InvalidOperationException("Недостижимая ошибка.")
-            : new IPAddress(buffer[..written]);
-    }
-
-    private async Task<IPAddress> AllocateAndMapIpV4Address(
+    private async Task<IPAddress> AllocateAndMapIpAddress(
+        IpAllocator allocator,
         IPAddress readIp,
         uint ttl,
         CancellationToken cancellationToken = default
     )
     {
-        var address = AllocateAddress(IpV4Range, ref IpV4Counter);
-
-        await MapFakeToRealIpAsync(address, readIp, ttl, cancellationToken);
-
-        return address;
-    }
-
-    private async Task<IPAddress> AllocateAndMapIpV6Address(
-        IPAddress readIp,
-        uint ttl,
-        CancellationToken cancellationToken = default
-    )
-    {
-        var address = AllocateAddress(IpV6Range, ref IpV6Counter);
+        var address = allocator.Allocate();
 
         await MapFakeToRealIpAsync(address, readIp, ttl, cancellationToken);
 
@@ -247,25 +228,8 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
         }
 
         await IpMapper.MapIpAsync(
-            new MapIpRequest { FakeIp = ToByteString(fake), RealIp = ToByteString(real), Ttl = ttl },
+            new MapIpRequest { FakeIp = fake.ToByteString(), RealIp = real.ToByteString(), Ttl = ttl },
             cancellationToken: cancellationToken);
-    }
-
-    private ByteString ToByteString(IPAddress address)
-    {
-        Span<byte> buffer = address.AddressFamily switch
-        {
-            AddressFamily.InterNetwork => stackalloc byte[4],
-            AddressFamily.InterNetworkV6 => stackalloc byte[16],
-            _ => throw new ArgumentOutOfRangeException()
-        };
-
-        if (!address.TryWriteBytes(buffer, out var written))
-        {
-            throw new InvalidOperationException();
-        }
-
-        return ByteString.CopyFrom(buffer);
     }
 
     public void Dispose()
