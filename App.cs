@@ -157,7 +157,7 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
                         DnsResourceRecordType.AAAA,
                         DnsClass.IN,
                         Ttl,
-                        new DnsARecordData(await AllocateAndMapIpAddress(config.Ipv6Allocator!, ipv6RecordData.Address,
+                        new DnsAAAARecordData(await AllocateAndMapIpAddress(config.Ipv6Allocator!, ipv6RecordData.Address,
                             Ttl)));
                     break;
 
