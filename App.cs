@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Net;
 using System.Text.Json;
@@ -64,7 +65,9 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
 
             var parsedConfig = new RangeConfig(
                 rangeConfig.GetPropertyValue("ipV4Range", null),
-                rangeConfig.GetPropertyValue("ipV6Range", null)
+                rangeConfig.GetPropertyValue("ipV6Range", null),
+                rangeConfig.GetPropertyValue("maxIpv4AddressesPerDomain", 1),
+                rangeConfig.GetPropertyValue("maxIpv6AddressesPerDomain", 1)
             );
 
             if (parsedConfig is { Ipv4Configured: false, Ipv6Configured: false })
@@ -118,47 +121,57 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
             question.Type is
                 not DnsResourceRecordType.A and
                 not DnsResourceRecordType.AAAA ||
-            !TryGetRangeIndex(domain, out var rangeIndex))
+            !TryGetRangeConfig(domain, out var config))
         {
             return response;
         }
 
-        var config = GetRangeConfig(rangeIndex);
-
-        if (config is null)
-        {
-            return response;
-        }
-
-        DnsResourceRecord answer;
+        var answers = new List<DnsResourceRecord>();
 
         try
         {
             switch (question.Type)
             {
-                case DnsResourceRecordType.A when config.Ipv4Configured &&
-                                                  response.Answer.Select(x => x.RDATA).OfType<DnsARecordData>()
-                                                      .FirstOrDefault() is { } ipv4RecordData:
-                    answer = new DnsResourceRecord(
+                case DnsResourceRecordType.A when config.Ipv4Configured:
+                    var aRecords = response.Answer.Select(x => x.RDATA).OfType<DnsARecordData>();
+
+                    if (config.MaxIpv4AddressesPerDomain != 0)
+                    {
+                        aRecords = aRecords.Take(config.MaxIpv4AddressesPerDomain);
+                    }
+
+                    var fakeIpv4 =
+                        await AllocateAndMapIpAddress(config.Ipv4Allocator!, aRecords.Select(x => x.Address), Ttl);
+
+                    answers.AddRange(fakeIpv4.Select(ip => new DnsResourceRecord(
                         domain,
                         DnsResourceRecordType.A,
                         DnsClass.IN,
                         Ttl,
-                        new DnsARecordData(await AllocateAndMapIpAddress(config.Ipv4Allocator!, ipv4RecordData.Address,
-                            Ttl)));
+                        new DnsARecordData(ip)))
+                    );
+
                     break;
 
-                case DnsResourceRecordType.AAAA
-                    when config.Ipv6Configured &&
-                         response.Answer.Select(x => x.RDATA).OfType<DnsAAAARecordData>().FirstOrDefault() is
-                             { } ipv6RecordData:
-                    answer = new DnsResourceRecord(
+                case DnsResourceRecordType.AAAA when config.Ipv6Configured:
+                    var aaaaRecords = response.Answer.Select(x => x.RDATA).OfType<DnsAAAARecordData>();
+
+                    if (config.MaxIpv6AddressesPerDomain != 0)
+                    {
+                        aaaaRecords = aaaaRecords.Take(config.MaxIpv6AddressesPerDomain);
+                    }
+
+                    var fakeIpv6 = await AllocateAndMapIpAddress(config.Ipv6Allocator!,
+                        aaaaRecords.Select(x => x.Address), Ttl);
+
+                    answers.AddRange(fakeIpv6.Select(ip => new DnsResourceRecord(
                         domain,
                         DnsResourceRecordType.AAAA,
                         DnsClass.IN,
                         Ttl,
-                        new DnsAAAARecordData(await AllocateAndMapIpAddress(config.Ipv6Allocator!, ipv6RecordData.Address,
-                            Ttl)));
+                        new DnsAAAARecordData(ip)))
+                    );
+
                     break;
 
                 default: return response;
@@ -173,62 +186,60 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
 
         return new DnsDatagram(response.Identifier, response.IsResponse, response.OPCODE,
             response.AuthoritativeAnswer, response.Truncation, response.RecursionDesired, response.RecursionAvailable,
-            response.AuthenticData, response.CheckingDisabled, response.RCODE, response.Question, [answer],
+            response.AuthenticData, response.CheckingDisabled, response.RCODE, response.Question, answers,
             response.Authority, response.Additional);
     }
 
-    private bool TryGetRangeIndex(string domain, out int rangeIndex)
+    private bool TryGetRangeConfig(string domain, [MaybeNullWhen(false)] out RangeConfig rangeConfig)
     {
         foreach (var domainLevel in domain.EnumerateDomainLevels())
         {
-            if (Lookup.TryGetValue(domainLevel, out rangeIndex))
+            if (Lookup.TryGetValue(domainLevel, out var rangeIndex))
             {
+                if (rangeIndex < 0 || rangeIndex >= Configs.Count)
+                {
+                    rangeConfig = null;
+                    return false;
+                }
+
+                rangeConfig = Configs[rangeIndex];
                 return true;
             }
         }
 
-        rangeIndex = -1;
+        rangeConfig = null;
         return false;
     }
 
-    private RangeConfig? GetRangeConfig(int index)
-    {
-        if (index < 0 || index >= Configs.Count)
-        {
-            return null;
-        }
-
-        return Configs[index];
-    }
-
-    private async Task<IPAddress> AllocateAndMapIpAddress(
+    private async Task<IPAddress[]> AllocateAndMapIpAddress(
         IpAllocator allocator,
-        IPAddress readIp,
+        IEnumerable<IPAddress> readIp,
         uint ttl,
         CancellationToken cancellationToken = default
     )
     {
-        var address = allocator.Allocate();
+        var realIpArray = readIp.ToArray();
+        var address = allocator.Allocate(realIpArray.Length).ToArray();
 
-        await MapFakeToRealIpAsync(address, readIp, ttl, cancellationToken);
+        await MapFakeToRealIpAsync(address, realIpArray, ttl, cancellationToken);
 
         return address;
     }
 
     private async Task MapFakeToRealIpAsync(
-        IPAddress fake,
-        IPAddress real,
+        IEnumerable<IPAddress> fake,
+        IEnumerable<IPAddress> real,
         uint ttl,
         CancellationToken cancellationToken = default
     )
     {
-        if (fake.AddressFamily != real.AddressFamily)
-        {
-            throw new InvalidOperationException($"couldn't map {fake.AddressFamily} address with {real.AddressFamily}");
-        }
-
-        await IpMapper.MapIpAsync(
-            new MapIpRequest { FakeIp = fake.ToByteString(), RealIp = real.ToByteString(), Ttl = ttl },
+        await IpMapper.MapIpMultipleAsync(
+            new MapIpMultipleRequest
+            {
+                FakeIps = { fake.Select(x => x.ToByteString()) },
+                RealIps = { real.Select(x => x.ToByteString()) },
+                Ttl = ttl
+            },
             cancellationToken: cancellationToken);
     }
 

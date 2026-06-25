@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Numerics;
 using System.Threading;
@@ -33,16 +34,32 @@ public class IpAllocator
     public IPAddress Allocate()
     {
         var addressIndex = Interlocked.Increment(ref Counter) - 1;
-        addressIndex %= RangeSize;
 
-        if (addressIndex < 0)
+        return GetAddressByIndex(addressIndex);
+    }
+
+    public IEnumerable<IPAddress> Allocate(int count)
+    {
+        var lastIndex = Interlocked.Add(ref Counter, count) - 1;
+
+        for (int i = 0; i < count; i++)
         {
-            addressIndex += RangeSize;
+            yield return GetAddressByIndex(lastIndex - i);
+        }
+    }
+
+    private IPAddress GetAddressByIndex(long index)
+    {
+        index %= RangeSize;
+
+        if (index < 0)
+        {
+            index += RangeSize;
         }
 
         Span<byte> buffer = stackalloc byte[BufferSize];
 
-        var newAddress = RangeStart + addressIndex;
+        var newAddress = RangeStart + index;
 
         newAddress.TryWriteBytes(buffer, out _, isBigEndian: true);
 

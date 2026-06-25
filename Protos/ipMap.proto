@@ -5,13 +5,20 @@ option csharp_namespace = "IpGrpcMap";
 package ipMap;
 
 service IpMapper {
-  // Sends a greeting
   rpc MapIp (MapIpRequest) returns (MapIpReply);
+
+  rpc MapIpMultiple (MapIpMultipleRequest) returns (MapIpReply);
 }
 
 message MapIpRequest {
   bytes fakeIp = 1;
   bytes realIp = 2;
+  uint32 ttl = 3;
+}
+
+message MapIpMultipleRequest {
+  repeated bytes fakeIps = 1;
+  repeated bytes realIps = 2;
   uint32 ttl = 3;
 }
 
