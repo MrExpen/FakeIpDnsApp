@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Numerics;
 using System.Threading;
@@ -7,8 +8,18 @@ using FakeIpRouting.Extensions;
 
 namespace FakeIpRouting;
 
-public class IpAllocator
+public sealed class IpAllocator
 {
+    public IPAddressRange Range
+    {
+        get
+        {
+            Span<byte> buffer = stackalloc byte[BufferSize];
+            RangeStart.TryWriteBytes(buffer, out _, isBigEndian: true);
+            return new IPAddressRange(new IPAddress(buffer), RangeSize);
+        }
+    }
+
     private readonly BigInteger RangeStart;
     private readonly long RangeSize;
     private readonly int BufferSize;
@@ -65,4 +76,28 @@ public class IpAllocator
 
         return new IPAddress(buffer);
     }
+
+    public static IpAllocator ParseRange(ReadOnlySpan<char> range)
+    {
+        return new IpAllocator(IPAddressRange.Parse(range));
+    }
+
+    private sealed class RangeSizeRangeStartEqualityComparer : IEqualityComparer<IpAllocator>
+    {
+        public bool Equals(IpAllocator? x, IpAllocator? y)
+        {
+            if (ReferenceEquals(x, y)) return true;
+            if (x is null) return false;
+            if (y is null) return false;
+            if (x.GetType() != y.GetType()) return false;
+            return x.RangeSize == y.RangeSize && x.RangeStart.Equals(y.RangeStart);
+        }
+
+        public int GetHashCode(IpAllocator obj)
+        {
+            return HashCode.Combine(obj.RangeSize, obj.RangeStart);
+        }
+    }
+
+    public static IEqualityComparer<IpAllocator> RangeComparer { get; } = new RangeSizeRangeStartEqualityComparer();
 }

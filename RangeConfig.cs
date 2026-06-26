@@ -20,14 +20,26 @@ public class RangeConfig
     {
         if (ipv4Range is not null)
         {
-            Ipv4Allocator = new IpAllocator(IPAddressRange.Parse(ipv4Range));
+            Ipv4Allocator = IpAllocator.ParseRange(ipv4Range);
         }
 
         if (ipv6Range is not null)
         {
-            Ipv6Allocator = new IpAllocator(IPAddressRange.Parse(ipv6Range));
+            Ipv6Allocator = IpAllocator.ParseRange(ipv6Range);
         }
-        
+
+        MaxIpv4AddressesPerDomain = maxIpv4AddressesPerDomain;
+        MaxIpv6AddressesPerDomain = maxIpv6AddressesPerDomain;
+    }
+
+    public RangeConfig(
+        IpAllocator? ipv4Allocator,
+        IpAllocator? ipv6Allocator,
+        int maxIpv4AddressesPerDomain,
+        int maxIpv6AddressesPerDomain)
+    {
+        Ipv4Allocator = ipv4Allocator;
+        Ipv6Allocator = ipv6Allocator;
         MaxIpv4AddressesPerDomain = maxIpv4AddressesPerDomain;
         MaxIpv6AddressesPerDomain = maxIpv6AddressesPerDomain;
     }

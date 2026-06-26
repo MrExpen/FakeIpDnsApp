@@ -41,6 +41,17 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
         using var jsonDocument = JsonDocument.Parse(config!, JsonParseOptions);
         var jsonConfig = jsonDocument.RootElement;
 
+        var allocatorFactory = new IpAllocatorFactory();
+
+        if (Configs is not null)
+        {
+            foreach (var rangeConfig in Configs)
+            {
+                allocatorFactory.TryAdd(rangeConfig.Ipv4Allocator);
+                allocatorFactory.TryAdd(rangeConfig.Ipv6Allocator);
+            }
+        }
+
         Disable = jsonConfig.GetPropertyValue("disable", false);
 
         GrpcAgentAddress = jsonConfig.GetPropertyValue("grpcAgentAddress", "http://127.0.0.1:5000");
@@ -64,8 +75,8 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
             }
 
             var parsedConfig = new RangeConfig(
-                rangeConfig.GetPropertyValue("ipV4Range", null),
-                rangeConfig.GetPropertyValue("ipV6Range", null),
+                allocatorFactory.Create(rangeConfig.GetPropertyValue("ipV4Range", null)),
+                allocatorFactory.Create(rangeConfig.GetPropertyValue("ipV6Range", null)),
                 rangeConfig.GetPropertyValue("maxIpv4AddressesPerDomain", 1),
                 rangeConfig.GetPropertyValue("maxIpv6AddressesPerDomain", 1)
             );

@@ -10,7 +10,7 @@ public class IPAddressRange
 
     public long AddressCount { get; }
 
-    private IPAddressRange(IPAddress begin, long addressCount)
+    internal IPAddressRange(IPAddress begin, long addressCount)
     {
         Begin = begin;
         AddressCount = addressCount;
@@ -55,5 +55,23 @@ public class IPAddressRange
         buffer[^index] &= (byte)(0b11111111 << maskLength);
 
         return new IPAddressRange(new IPAddress(buffer), 1L << (addressLength - hostLength));
+    }
+
+    protected bool Equals(IPAddressRange other)
+    {
+        return Begin.Equals(other.Begin) && AddressCount == other.AddressCount;
+    }
+
+    public override bool Equals(object? obj)
+    {
+        if (obj is null) return false;
+        if (ReferenceEquals(this, obj)) return true;
+        if (obj.GetType() != GetType()) return false;
+        return Equals((IPAddressRange)obj);
+    }
+
+    public override int GetHashCode()
+    {
+        return HashCode.Combine(Begin, AddressCount);
     }
 }
