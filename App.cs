@@ -32,7 +32,7 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
     private IpMapper.IpMapperClient IpMapper = null!;
 
     private bool IgnoreCase;
-    private uint Ttl;
+    private uint MaxTtl;
 
     private FrozenDictionary<string, int> DomainToRange = null!;
     private FrozenDictionary<string, int>.AlternateLookup<ReadOnlySpan<char>> Lookup;
@@ -48,6 +48,7 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
 
         var allocatorFactory = new IpAllocatorFactory();
 
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
         if (Configs is not null)
         {
             foreach (var rangeConfig in Configs)
@@ -65,7 +66,7 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
         Channel = GrpcChannel.ForAddress(GrpcAgentAddress);
         IpMapper = new IpMapper.IpMapperClient(Channel);
 
-        Ttl = jsonConfig.GetPropertyValue("ttl", 3600u);
+        MaxTtl = jsonConfig.GetPropertyValue("maxTtl", 3600u);
         IgnoreCase = jsonConfig.GetPropertyValue("ignoreCase", true);
 
         var configs = new List<RangeConfig>();
@@ -165,43 +166,49 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
                     return response;
 
                 case DnsResourceRecordType.A when config.Ipv4Configured:
-                    var aRecords = response.Answer.Select(x => x.RDATA).OfType<DnsARecordData>();
+                    var aRecords = response.Answer
+                        .Select(x => new { Record = x.RDATA as DnsARecordData, Ttl = x.TTL })
+                        .Where(x => x.Record is not null)
+                        .TakeIfNotZero(config.MaxIpv4AddressesPerDomain)
+                        .ToArray();
 
-                    if (config.MaxIpv4AddressesPerDomain != 0)
-                    {
-                        aRecords = aRecords.Take(config.MaxIpv4AddressesPerDomain);
-                    }
+                    var fakeIpv4 = await AllocateAndMapIpAddress(
+                        config.Ipv4Allocator!,
+                        aRecords.Select(x => x.Record!.Address),
+                        MaxTtl
+                    );
 
-                    var fakeIpv4 =
-                        await AllocateAndMapIpAddress(config.Ipv4Allocator!, aRecords.Select(x => x.Address), Ttl);
-
-                    answers.AddRange(fakeIpv4.Select(ip => new DnsResourceRecord(
-                        domain,
-                        DnsResourceRecordType.A,
-                        DnsClass.IN,
-                        Ttl,
-                        new DnsARecordData(ip)))
+                    answers.AddRange(fakeIpv4.Zip(aRecords)
+                        .Select(zip => new DnsResourceRecord(
+                            domain,
+                            DnsResourceRecordType.A,
+                            DnsClass.IN,
+                            Math.Min(zip.Second.Ttl, MaxTtl),
+                            new DnsARecordData(zip.First)))
                     );
 
                     break;
 
                 case DnsResourceRecordType.AAAA when config.Ipv6Configured:
-                    var aaaaRecords = response.Answer.Select(x => x.RDATA).OfType<DnsAAAARecordData>();
+                    var aaaaRecords = response.Answer
+                        .Select(x => new { Record = x.RDATA as DnsAAAARecordData, Ttl = x.TTL })
+                        .Where(x => x.Record is not null)
+                        .TakeIfNotZero(config.MaxIpv6AddressesPerDomain)
+                        .ToArray();
 
-                    if (config.MaxIpv6AddressesPerDomain != 0)
-                    {
-                        aaaaRecords = aaaaRecords.Take(config.MaxIpv6AddressesPerDomain);
-                    }
+                    var fakeIpv6 = await AllocateAndMapIpAddress(
+                        config.Ipv6Allocator!,
+                        aaaaRecords.Select(x => x.Record!.Address),
+                        MaxTtl
+                    );
 
-                    var fakeIpv6 = await AllocateAndMapIpAddress(config.Ipv6Allocator!,
-                        aaaaRecords.Select(x => x.Address), Ttl);
-
-                    answers.AddRange(fakeIpv6.Select(ip => new DnsResourceRecord(
-                        domain,
-                        DnsResourceRecordType.AAAA,
-                        DnsClass.IN,
-                        Ttl,
-                        new DnsAAAARecordData(ip)))
+                    answers.AddRange(fakeIpv6.Zip(aaaaRecords)
+                        .Select(zip => new DnsResourceRecord(
+                            domain,
+                            DnsResourceRecordType.AAAA,
+                            DnsClass.IN,
+                            Math.Min(zip.Second.Ttl, MaxTtl),
+                            new DnsAAAARecordData(zip.First)))
                     );
 
                     break;

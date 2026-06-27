@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Numerics;
 using System.Threading;
@@ -43,6 +42,11 @@ public sealed class IpAllocator
 
     public IPAddress[] Allocate(int count)
     {
+        if (count == 0)
+        {
+            return [];
+        }
+
         var lastIndex = Interlocked.Add(ref Counter, count) - 1;
 
         var result = new IPAddress[count];
