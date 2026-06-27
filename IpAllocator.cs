@@ -29,15 +29,7 @@ public sealed class IpAllocator
     public IpAllocator(IPAddressRange range)
     {
         BufferSize = range.Begin.BufferSize;
-
-        Span<byte> buffer = stackalloc byte[BufferSize];
-
-        if (!range.Begin.TryWriteBytes(buffer, out var written))
-        {
-            throw new InvalidOperationException("Недостижимая ошибка.");
-        }
-
-        RangeStart = new BigInteger(buffer[..written], isBigEndian: true);
+        RangeStart = range.Begin.ToBigInteger();
         RangeSize = range.AddressCount;
         Counter = 0L;
     }
@@ -49,14 +41,30 @@ public sealed class IpAllocator
         return GetAddressByIndex(addressIndex);
     }
 
-    public IEnumerable<IPAddress> Allocate(int count)
+    public IPAddress[] Allocate(int count)
     {
         var lastIndex = Interlocked.Add(ref Counter, count) - 1;
 
+        var result = new IPAddress[count];
+
         for (int i = 0; i < count; i++)
         {
-            yield return GetAddressByIndex(lastIndex - i);
+            result[i] = GetAddressByIndex(lastIndex - i);
         }
+
+        return result;
+    }
+
+    public bool RangeContains(IPAddress address)
+    {
+        if (address.BufferSize != BufferSize)
+        {
+            return false;
+        }
+
+        var distance = address.ToBigInteger() - RangeStart;
+
+        return distance >= 0 && distance < RangeSize;
     }
 
     private IPAddress GetAddressByIndex(long index)
@@ -68,13 +76,9 @@ public sealed class IpAllocator
             index += RangeSize;
         }
 
-        Span<byte> buffer = stackalloc byte[BufferSize];
+        var newAddressInteger = RangeStart + index;
 
-        var newAddress = RangeStart + index;
-
-        newAddress.TryWriteBytes(buffer, out _, isBigEndian: true);
-
-        return new IPAddress(buffer);
+        return newAddressInteger.ToIpAddress(BufferSize);
     }
 
     public static IpAllocator ParseRange(ReadOnlySpan<char> range)

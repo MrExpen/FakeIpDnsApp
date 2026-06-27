@@ -22,7 +22,10 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
     private static readonly JsonDocumentOptions JsonParseOptions = new()
         { CommentHandling = JsonCommentHandling.Skip };
 
+    private IDnsServer DnsServer = null!;
+
     private bool Disable;
+    private bool Cache;
 
     private string GrpcAgentAddress = null!;
     private GrpcChannel? Channel;
@@ -38,6 +41,8 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
 
     public Task InitializeAsync(IDnsServer dnsServer, string? config)
     {
+        DnsServer = dnsServer;
+
         using var jsonDocument = JsonDocument.Parse(config!, JsonParseOptions);
         var jsonConfig = jsonDocument.RootElement;
 
@@ -53,6 +58,7 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
         }
 
         Disable = jsonConfig.GetPropertyValue("disable", false);
+        Cache = jsonConfig.GetPropertyValue("cache", true);
 
         GrpcAgentAddress = jsonConfig.GetPropertyValue("grpcAgentAddress", "http://127.0.0.1:5000");
         Channel?.Dispose();
@@ -119,30 +125,45 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
         DnsDatagram response
     )
     {
-        if (Disable)
-        {
-            return response;
-        }
-
-        var question = request.Question[0];
-        var domain = question.Name;
-
-        if (response.RCODE != DnsResponseCode.NoError ||
-            response.Answer.Count == 0 ||
-            question.Type is
-                not DnsResourceRecordType.A and
-                not DnsResourceRecordType.AAAA ||
-            !TryGetRangeConfig(domain, out var config))
-        {
-            return response;
-        }
-
-        var answers = new List<DnsResourceRecord>();
-
         try
         {
+            if (Disable)
+            {
+                return response;
+            }
+
+            var question = request.Question[0];
+            var domain = question.Name;
+
+            if (response.RCODE != DnsResponseCode.NoError ||
+                response.Answer.Count == 0 ||
+                question.Type is
+                    not DnsResourceRecordType.A and
+                    not DnsResourceRecordType.AAAA ||
+                !TryGetRangeConfig(domain, out var config))
+            {
+                return response;
+            }
+
+            var answers = new List<DnsResourceRecord>();
+
             switch (question.Type)
             {
+                // If response is already FakeIp range. Cache path
+                case DnsResourceRecordType.A when config.Ipv4Configured &&
+                                                  response.Answer
+                                                      .Select(x => x.RDATA)
+                                                      .OfType<DnsARecordData>()
+                                                      .Any(x => config.Ipv4Allocator!.RangeContains(x.Address)):
+                    return response;
+                // If response is already FakeIp range. Cache path
+                case DnsResourceRecordType.AAAA when config.Ipv6Configured &&
+                                                     response.Answer
+                                                         .Select(x => x.RDATA)
+                                                         .OfType<DnsAAAARecordData>()
+                                                         .Any(x => config.Ipv6Allocator!.RangeContains(x.Address)):
+                    return response;
+
                 case DnsResourceRecordType.A when config.Ipv4Configured:
                     var aRecords = response.Answer.Select(x => x.RDATA).OfType<DnsARecordData>();
 
@@ -187,6 +208,20 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
 
                 default: return response;
             }
+
+
+            var result = new DnsDatagram(response.Identifier, response.IsResponse, response.OPCODE,
+                response.AuthoritativeAnswer, response.Truncation, response.RecursionDesired,
+                response.RecursionAvailable,
+                response.AuthenticData, response.CheckingDisabled, response.RCODE, response.Question, answers,
+                response.Authority, response.Additional);
+
+            if (Cache)
+            {
+                DnsServer.DnsCache.CacheResponse(result);
+            }
+
+            return result;
         }
         catch (Exception e)
         {
@@ -194,11 +229,6 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
 
             return response;
         }
-
-        return new DnsDatagram(response.Identifier, response.IsResponse, response.OPCODE,
-            response.AuthoritativeAnswer, response.Truncation, response.RecursionDesired, response.RecursionAvailable,
-            response.AuthenticData, response.CheckingDisabled, response.RCODE, response.Question, answers,
-            response.Authority, response.Additional);
     }
 
     private bool TryGetRangeConfig(string domain, [MaybeNullWhen(false)] out RangeConfig rangeConfig)
@@ -230,7 +260,7 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
     )
     {
         var realIpArray = readIp.ToArray();
-        var address = allocator.Allocate(realIpArray.Length).ToArray();
+        var address = allocator.Allocate(realIpArray.Length);
 
         await MapFakeToRealIpAsync(address, realIpArray, ttl, cancellationToken);
 

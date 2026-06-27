@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Net;
 using System.Net.Sockets;
+using FakeIpRouting.Extensions;
 
 namespace FakeIpRouting;
 
@@ -14,6 +15,18 @@ public class IPAddressRange
     {
         Begin = begin;
         AddressCount = addressCount;
+    }
+
+    public bool Contains(IPAddress value)
+    {
+        if (Begin.AddressFamily != value.AddressFamily)
+        {
+            return false;
+        }
+
+        var distance = value.ToBigInteger() - Begin.ToBigInteger();
+
+        return distance >= 0 && distance < AddressCount;
     }
 
     public static IPAddressRange Parse(ReadOnlySpan<char> value)
