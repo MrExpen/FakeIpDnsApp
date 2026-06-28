@@ -4,10 +4,12 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Net;
+using System.Numerics;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using DnsServerCore.ApplicationCommon;
+using FakeIpRouting.Allocators;
 using FakeIpRouting.Extensions;
 using Grpc.Net.Client;
 using IpGrpcMap;
@@ -46,15 +48,16 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
         using var jsonDocument = JsonDocument.Parse(config!, JsonParseOptions);
         var jsonConfig = jsonDocument.RootElement;
 
-        var allocatorFactory = new IpAllocatorFactory();
+        var ipv4AllocatorFactory = new Ipv4AllocatorFactory();
+        var ipv6AllocatorFactory = new Ipv6AllocatorFactory();
 
         // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
         if (Configs is not null)
         {
             foreach (var rangeConfig in Configs)
             {
-                allocatorFactory.TryAdd(rangeConfig.Ipv4Allocator);
-                allocatorFactory.TryAdd(rangeConfig.Ipv6Allocator);
+                ipv4AllocatorFactory.TryAdd(rangeConfig.Ipv4Allocator);
+                ipv6AllocatorFactory.TryAdd(rangeConfig.Ipv6Allocator);
             }
         }
 
@@ -82,8 +85,8 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
             }
 
             var parsedConfig = new RangeConfig(
-                allocatorFactory.Create(rangeConfig.GetPropertyValue("ipV4Range", null)),
-                allocatorFactory.Create(rangeConfig.GetPropertyValue("ipV6Range", null)),
+                ipv4AllocatorFactory.Create(rangeConfig.GetPropertyValue("ipV4Range", null)),
+                ipv6AllocatorFactory.Create(rangeConfig.GetPropertyValue("ipV6Range", null)),
                 rangeConfig.GetPropertyValue("maxIpv4AddressesPerDomain", 1),
                 rangeConfig.GetPropertyValue("maxIpv6AddressesPerDomain", 1)
             );
@@ -145,7 +148,7 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
             {
                 return response;
             }
-            
+
             IReadOnlyList<DnsResourceRecord> answers;
 
             switch (question.Type)
@@ -227,7 +230,7 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
                 response.AuthenticData, response.CheckingDisabled, response.RCODE, response.Question, answers,
                 response.Authority, response.Additional);
 
-            if (Cache)
+            if (Cache && !response.Answer.Any(x => x.RDATA is DnsCNAMERecordData))
             {
                 DnsServer.DnsCache.CacheResponse(result);
             }
@@ -263,15 +266,15 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
         return false;
     }
 
-    private async Task<IPAddress[]> AllocateAndMapIpAddress(
-        IpAllocator allocator,
+    private async Task<IPAddress[]> AllocateAndMapIpAddress<TUnit>(
+        BaseIpAllocator<TUnit> allocator,
         IEnumerable<IPAddress> readIp,
         uint ttl,
         CancellationToken cancellationToken = default
-    )
+    ) where TUnit : struct, IBinaryInteger<TUnit>
     {
         var realIpArray = readIp.ToArray();
-        var address = allocator.Allocate(realIpArray.Length);
+        var address = allocator.Allocate((uint)realIpArray.Length);
 
         await MapFakeToRealIpAsync(address, realIpArray, ttl, cancellationToken);
 

@@ -1,12 +1,14 @@
 ﻿using System.Collections.Generic;
+using System.Numerics;
 
-namespace FakeIpRouting;
+namespace FakeIpRouting.Allocators;
 
-public class IpAllocatorFactory
+public abstract class BaseIpAllocatorFactory<TAllocator, TUint> where TAllocator : BaseIpAllocator<TUint>
+    where TUint : struct, IBinaryInteger<TUint>
 {
-    private readonly Dictionary<IPAddressRange, IpAllocator> Allocators = new();
+    private readonly Dictionary<IPAddressRange, TAllocator> Allocators = new();
 
-    public IpAllocator? Create(string? range)
+    public TAllocator? Create(string? range)
     {
         if (range is null)
         {
@@ -16,19 +18,21 @@ public class IpAllocatorFactory
         return Create(IPAddressRange.Parse(range));
     }
 
-    public IpAllocator Create(IPAddressRange range)
+    public TAllocator Create(IPAddressRange range)
     {
         if (Allocators.TryGetValue(range, out var ipAllocator))
         {
             return ipAllocator;
         }
 
-        ipAllocator = new IpAllocator(range);
+        ipAllocator = InternalCreate(range);
         Allocators.Add(range, ipAllocator);
         return ipAllocator;
     }
 
-    public void AddRange(IEnumerable<IpAllocator> allocators)
+    protected abstract TAllocator InternalCreate(IPAddressRange range);
+
+    public void AddRange(IEnumerable<TAllocator> allocators)
     {
         foreach (var ipAllocator in allocators)
         {
@@ -36,7 +40,7 @@ public class IpAllocatorFactory
         }
     }
 
-    public bool TryAdd(IpAllocator? allocator)
+    public bool TryAdd(TAllocator? allocator)
     {
         if (allocator is null)
         {
