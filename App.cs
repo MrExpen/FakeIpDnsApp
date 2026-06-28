@@ -145,8 +145,8 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
             {
                 return response;
             }
-
-            var answers = new List<DnsResourceRecord>();
+            
+            IReadOnlyList<DnsResourceRecord> answers;
 
             switch (question.Type)
             {
@@ -178,14 +178,16 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
                         MaxTtl
                     );
 
-                    answers.AddRange(fakeIpv4.Zip(aRecords)
-                        .Select(zip => new DnsResourceRecord(
-                            domain,
-                            DnsResourceRecordType.A,
-                            DnsClass.IN,
-                            Math.Min(zip.Second.Ttl, MaxTtl),
-                            new DnsARecordData(zip.First)))
-                    );
+                    answers =
+                    [
+                        .. fakeIpv4.Zip(aRecords)
+                            .Select(zip => new DnsResourceRecord(
+                                domain,
+                                DnsResourceRecordType.A,
+                                DnsClass.IN,
+                                Math.Min(zip.Second.Ttl, MaxTtl),
+                                new DnsARecordData(zip.First)))
+                    ];
 
                     break;
 
@@ -202,14 +204,16 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
                         MaxTtl
                     );
 
-                    answers.AddRange(fakeIpv6.Zip(aaaaRecords)
-                        .Select(zip => new DnsResourceRecord(
-                            domain,
-                            DnsResourceRecordType.AAAA,
-                            DnsClass.IN,
-                            Math.Min(zip.Second.Ttl, MaxTtl),
-                            new DnsAAAARecordData(zip.First)))
-                    );
+                    answers =
+                    [
+                        .. fakeIpv6.Zip(aaaaRecords)
+                            .Select(zip => new DnsResourceRecord(
+                                domain,
+                                DnsResourceRecordType.AAAA,
+                                DnsClass.IN,
+                                Math.Min(zip.Second.Ttl, MaxTtl),
+                                new DnsAAAARecordData(zip.First)))
+                    ];
 
                     break;
 
@@ -232,7 +236,7 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
         }
         catch (Exception e)
         {
-            Console.WriteLine(e);
+            DnsServer.WriteLog(e);
 
             return response;
         }
