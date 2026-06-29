@@ -139,7 +139,9 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
             var question = request.Question[0];
             var domain = question.Name;
 
-            if (response.RCODE != DnsResponseCode.NoError ||
+            if (question.Class != DnsClass.IN ||
+                response.OPCODE != DnsOpcode.StandardQuery ||
+                response.RCODE != DnsResponseCode.NoError ||
                 response.Answer.Count == 0 ||
                 question.Type is
                     not DnsResourceRecordType.A and
@@ -150,6 +152,25 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
             }
 
             IReadOnlyList<DnsResourceRecord> answers;
+
+            // Hack for CNAME
+            if (response.Answer.Any(x => x.RDATA is DnsCNAMERecordData))
+            {
+                var allCachedRecords = await DnsServer.DirectQueryAsync(
+                    new DnsQuestionRecord(domain, DnsResourceRecordType.ANY, question.Class)
+                );
+
+                var answersFromCache = allCachedRecords.Answer.Where(x => x.Type == question.Type).ToArray();
+
+                if (answersFromCache.Length != 0)
+                {
+                    return new DnsDatagram(response.Identifier, true, request.OPCODE,
+                        false, response.Truncation, request.RecursionDesired,
+                        request.RecursionAvailable,
+                        false, false, DnsResponseCode.NoError, request.Question,
+                        answersFromCache);
+                }
+            }
 
             switch (question.Type)
             {
@@ -223,14 +244,12 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
                 default: return response;
             }
 
-
             var result = new DnsDatagram(response.Identifier, response.IsResponse, response.OPCODE,
                 response.AuthoritativeAnswer, response.Truncation, response.RecursionDesired,
                 response.RecursionAvailable,
-                response.AuthenticData, response.CheckingDisabled, response.RCODE, response.Question, answers,
-                response.Authority, response.Additional);
+                response.AuthenticData, response.CheckingDisabled, response.RCODE, response.Question, answers);
 
-            if (Cache && !response.Answer.Any(x => x.RDATA is DnsCNAMERecordData))
+            if (Cache)
             {
                 DnsServer.DnsCache.CacheResponse(result);
             }
