@@ -129,153 +129,144 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
         DnsDatagram response
     )
     {
-        try
+        if (Disable)
         {
-            if (Disable)
-            {
-                return response;
-            }
-
-            var question = request.Question[0];
-            var domain = question.Name;
-
-            if (question.Class != DnsClass.IN ||
-                response.OPCODE != DnsOpcode.StandardQuery ||
-                response.RCODE != DnsResponseCode.NoError ||
-                response.Answer.Count == 0 ||
-                question.Type is
-                    not DnsResourceRecordType.A and
-                    not DnsResourceRecordType.AAAA ||
-                !TryGetRangeConfig(domain, out var config))
-            {
-                return response;
-            }
-
-            IReadOnlyList<DnsResourceRecord> answers;
-
-            // Hack for CNAME
-            if (response.Answer.Any(x => x.RDATA is DnsCNAMERecordData))
-            {
-                var allCachedRecords = await DnsServer.DirectQueryAsync(
-                    new DnsQuestionRecord(domain, DnsResourceRecordType.ANY, question.Class)
-                );
-
-                var answersFromCache = allCachedRecords.Answer.Where(x => x.Type == question.Type).ToArray();
-
-                var isIpv4FromFakeRange = answersFromCache.Length != 0 &&
-                                          question.Type == DnsResourceRecordType.A &&
-                                          config.Ipv4Configured &&
-                                          answersFromCache.Any(x =>
-                                              config.Ipv4Allocator!.RangeContains((x.RDATA as DnsARecordData)!
-                                                  .Address));
-
-                var isIpv6FromFakeRange = answersFromCache.Length != 0 &&
-                                          question.Type == DnsResourceRecordType.AAAA &&
-                                          config.Ipv6Configured &&
-                                          answersFromCache.Any(x =>
-                                              config.Ipv6Allocator!.RangeContains((x.RDATA as DnsAAAARecordData)!
-                                                  .Address));
-
-                if (isIpv4FromFakeRange || isIpv6FromFakeRange)
-                {
-                    return new DnsDatagram(response.Identifier, true, request.OPCODE,
-                        false, response.Truncation, request.RecursionDesired,
-                        request.RecursionAvailable,
-                        false, false, DnsResponseCode.NoError, request.Question,
-                        answersFromCache);
-                }
-            }
-
-            switch (question.Type)
-            {
-                // If response is already FakeIp range. Cache path
-                case DnsResourceRecordType.A when config.Ipv4Configured &&
-                                                  response.Answer
-                                                      .Select(x => x.RDATA)
-                                                      .OfType<DnsARecordData>()
-                                                      .Any(x => config.Ipv4Allocator!.RangeContains(x.Address)):
-                    return response;
-                // If response is already FakeIp range. Cache path
-                case DnsResourceRecordType.AAAA when config.Ipv6Configured &&
-                                                     response.Answer
-                                                         .Select(x => x.RDATA)
-                                                         .OfType<DnsAAAARecordData>()
-                                                         .Any(x => config.Ipv6Allocator!.RangeContains(x.Address)):
-                    return response;
-
-                case DnsResourceRecordType.A when config.Ipv4Configured:
-                    var aRecords = response.Answer
-                        .Select(x => new { Record = x.RDATA as DnsARecordData, Ttl = x.TTL })
-                        .Where(x => x.Record is not null)
-                        .TakeIfNotZero(config.MaxIpv4AddressesPerDomain)
-                        .ToArray();
-
-                    var fakeIpv4 = await AllocateAndMapIpAddress(
-                        config.Ipv4Allocator!,
-                        aRecords.Select(x => x.Record!.Address),
-                        MaxTtl
-                    );
-
-                    answers =
-                    [
-                        .. fakeIpv4.Zip(aRecords)
-                            .Select(zip => new DnsResourceRecord(
-                                domain,
-                                DnsResourceRecordType.A,
-                                DnsClass.IN,
-                                Math.Min(zip.Second.Ttl, MaxTtl),
-                                new DnsARecordData(zip.First)))
-                    ];
-
-                    break;
-
-                case DnsResourceRecordType.AAAA when config.Ipv6Configured:
-                    var aaaaRecords = response.Answer
-                        .Select(x => new { Record = x.RDATA as DnsAAAARecordData, Ttl = x.TTL })
-                        .Where(x => x.Record is not null)
-                        .TakeIfNotZero(config.MaxIpv6AddressesPerDomain)
-                        .ToArray();
-
-                    var fakeIpv6 = await AllocateAndMapIpAddress(
-                        config.Ipv6Allocator!,
-                        aaaaRecords.Select(x => x.Record!.Address),
-                        MaxTtl
-                    );
-
-                    answers =
-                    [
-                        .. fakeIpv6.Zip(aaaaRecords)
-                            .Select(zip => new DnsResourceRecord(
-                                domain,
-                                DnsResourceRecordType.AAAA,
-                                DnsClass.IN,
-                                Math.Min(zip.Second.Ttl, MaxTtl),
-                                new DnsAAAARecordData(zip.First)))
-                    ];
-
-                    break;
-
-                default: return response;
-            }
-
-            var result = new DnsDatagram(response.Identifier, response.IsResponse, response.OPCODE,
-                response.AuthoritativeAnswer, response.Truncation, response.RecursionDesired,
-                response.RecursionAvailable,
-                response.AuthenticData, response.CheckingDisabled, response.RCODE, response.Question, answers);
-
-            if (Cache)
-            {
-                DnsServer.DnsCache.CacheResponse(result);
-            }
-
-            return result;
-        }
-        catch (Exception e)
-        {
-            DnsServer.WriteLog(e);
-
             return response;
         }
+
+        var question = request.Question[0];
+        var domain = question.Name;
+
+        if (question.Class != DnsClass.IN ||
+            response.OPCODE != DnsOpcode.StandardQuery ||
+            response.RCODE != DnsResponseCode.NoError ||
+            response.Answer.Count == 0 ||
+            question.Type is
+                not DnsResourceRecordType.A and
+                not DnsResourceRecordType.AAAA ||
+            !TryGetRangeConfig(domain, out var config))
+        {
+            return response;
+        }
+
+        IReadOnlyList<DnsResourceRecord> answers;
+
+        // Hack for CNAME
+        if (Cache && response.Answer.Any(x => x.RDATA is DnsCNAMERecordData))
+        {
+            var allCachedRecords = await DnsServer.DirectQueryAsync(
+                new DnsQuestionRecord(domain, DnsResourceRecordType.ANY, question.Class)
+            );
+
+            var answersFromCache = allCachedRecords.Answer.Where(x => x.Type == question.Type).ToArray();
+
+            var isIpv4FromFakeRange = answersFromCache.Length != 0 &&
+                                      question.Type == DnsResourceRecordType.A &&
+                                      config.Ipv4Configured &&
+                                      answersFromCache.Any(x =>
+                                          config.Ipv4Allocator!.RangeContains((x.RDATA as DnsARecordData)!
+                                              .Address));
+
+            var isIpv6FromFakeRange = answersFromCache.Length != 0 &&
+                                      question.Type == DnsResourceRecordType.AAAA &&
+                                      config.Ipv6Configured &&
+                                      answersFromCache.Any(x =>
+                                          config.Ipv6Allocator!.RangeContains((x.RDATA as DnsAAAARecordData)!
+                                              .Address));
+
+            if (isIpv4FromFakeRange || isIpv6FromFakeRange)
+            {
+                return new DnsDatagram(response.Identifier, true, request.OPCODE,
+                    false, response.Truncation, request.RecursionDesired,
+                    request.RecursionAvailable,
+                    false, false, DnsResponseCode.NoError, request.Question,
+                    answersFromCache);
+            }
+        }
+
+        switch (question.Type)
+        {
+            // If response is already FakeIp range. Cache path
+            case DnsResourceRecordType.A when config.Ipv4Configured &&
+                                              response.Answer
+                                                  .Select(x => x.RDATA)
+                                                  .OfType<DnsARecordData>()
+                                                  .Any(x => config.Ipv4Allocator!.RangeContains(x.Address)):
+                return response;
+            // If response is already FakeIp range. Cache path
+            case DnsResourceRecordType.AAAA when config.Ipv6Configured &&
+                                                 response.Answer
+                                                     .Select(x => x.RDATA)
+                                                     .OfType<DnsAAAARecordData>()
+                                                     .Any(x => config.Ipv6Allocator!.RangeContains(x.Address)):
+                return response;
+
+            case DnsResourceRecordType.A when config.Ipv4Configured:
+                var aRecords = response.Answer
+                    .Select(x => new { Record = x.RDATA as DnsARecordData, Ttl = x.TTL })
+                    .Where(x => x.Record is not null)
+                    .TakeIfNotZero(config.MaxIpv4AddressesPerDomain)
+                    .ToArray();
+
+                var fakeIpv4 = await AllocateAndMapIpAddress(
+                    config.Ipv4Allocator!,
+                    aRecords.Select(x => x.Record!.Address),
+                    MaxTtl
+                );
+
+                answers =
+                [
+                    .. fakeIpv4.Zip(aRecords)
+                        .Select(zip => new DnsResourceRecord(
+                            domain,
+                            DnsResourceRecordType.A,
+                            DnsClass.IN,
+                            Math.Min(zip.Second.Ttl, MaxTtl),
+                            new DnsARecordData(zip.First)))
+                ];
+
+                break;
+
+            case DnsResourceRecordType.AAAA when config.Ipv6Configured:
+                var aaaaRecords = response.Answer
+                    .Select(x => new { Record = x.RDATA as DnsAAAARecordData, Ttl = x.TTL })
+                    .Where(x => x.Record is not null)
+                    .TakeIfNotZero(config.MaxIpv6AddressesPerDomain)
+                    .ToArray();
+
+                var fakeIpv6 = await AllocateAndMapIpAddress(
+                    config.Ipv6Allocator!,
+                    aaaaRecords.Select(x => x.Record!.Address),
+                    MaxTtl
+                );
+
+                answers =
+                [
+                    .. fakeIpv6.Zip(aaaaRecords)
+                        .Select(zip => new DnsResourceRecord(
+                            domain,
+                            DnsResourceRecordType.AAAA,
+                            DnsClass.IN,
+                            Math.Min(zip.Second.Ttl, MaxTtl),
+                            new DnsAAAARecordData(zip.First)))
+                ];
+
+                break;
+
+            default: return response;
+        }
+
+        var result = new DnsDatagram(response.Identifier, response.IsResponse, response.OPCODE,
+            response.AuthoritativeAnswer, response.Truncation, response.RecursionDesired,
+            response.RecursionAvailable,
+            response.AuthenticData, response.CheckingDisabled, response.RCODE, response.Question, answers);
+
+        if (Cache)
+        {
+            DnsServer.DnsCache.CacheResponse(result);
+        }
+
+        return result;
     }
 
     private bool TryGetRangeConfig(string domain, [MaybeNullWhen(false)] out RangeConfig rangeConfig)
