@@ -162,7 +162,21 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
 
                 var answersFromCache = allCachedRecords.Answer.Where(x => x.Type == question.Type).ToArray();
 
-                if (answersFromCache.Length != 0)
+                var isIpv4FromFakeRange = answersFromCache.Length != 0 &&
+                                          question.Type == DnsResourceRecordType.A &&
+                                          config.Ipv4Configured &&
+                                          answersFromCache.Any(x =>
+                                              config.Ipv4Allocator!.RangeContains((x.RDATA as DnsARecordData)!
+                                                  .Address));
+
+                var isIpv6FromFakeRange = answersFromCache.Length != 0 &&
+                                          question.Type == DnsResourceRecordType.AAAA &&
+                                          config.Ipv6Configured &&
+                                          answersFromCache.Any(x =>
+                                              config.Ipv6Allocator!.RangeContains((x.RDATA as DnsAAAARecordData)!
+                                                  .Address));
+
+                if (isIpv4FromFakeRange || isIpv6FromFakeRange)
                 {
                     return new DnsDatagram(response.Identifier, true, request.OPCODE,
                         false, response.Truncation, request.RecursionDesired,
