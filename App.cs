@@ -71,7 +71,7 @@ public sealed class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
         else
         {
             IpMap = new LocalNftIpMap(
-                new DnsServerLogger(dnsServer),
+                jsonConfig.GetPropertyValue("logging", false) ? new DnsServerLogger(dnsServer) : NullLogger.Instance,
                 jsonConfig.GetPropertyValue("ipv4TableName", "vpn"),
                 jsonConfig.GetPropertyValue("ipv6TableName", "vpn"),
                 jsonConfig.GetPropertyValue("ipv4MapName", "fakeip_map"),
