@@ -1,11 +1,10 @@
 ﻿using System;
 using System.Net;
 using System.Net.Sockets;
-using FakeIpRouting.Extensions;
 
 namespace FakeIpRouting;
 
-public class IPAddressRange
+public class IPAddressRange : IEquatable<IPAddressRange>
 {
     public IPAddress Begin { get; }
 
@@ -15,18 +14,6 @@ public class IPAddressRange
     {
         Begin = begin;
         AddressCount = addressCount;
-    }
-
-    public bool Contains(IPAddress value)
-    {
-        if (Begin.AddressFamily != value.AddressFamily)
-        {
-            return false;
-        }
-
-        var distance = value.ToBigInteger() - Begin.ToBigInteger();
-
-        return distance >= 0 && distance < AddressCount;
     }
 
     public static IPAddressRange Parse(ReadOnlySpan<char> value)
@@ -70,8 +57,10 @@ public class IPAddressRange
         return new IPAddressRange(new IPAddress(buffer), 1L << (addressLength - hostLength));
     }
 
-    protected bool Equals(IPAddressRange other)
+    public bool Equals(IPAddressRange? other)
     {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
         return Begin.Equals(other.Begin) && AddressCount == other.AddressCount;
     }
 

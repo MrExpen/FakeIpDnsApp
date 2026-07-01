@@ -9,17 +9,7 @@ namespace FakeIpRouting.Allocators;
 
 public abstract class BaseIpAllocator<TUint> where TUint : struct, IBinaryInteger<TUint>
 {
-    public IPAddressRange Range
-    {
-        get
-        {
-            Span<byte> buffer = stackalloc byte[Unsafe.SizeOf<TUint>()];
-
-            MemoryMarshal.Cast<byte, TUint>(buffer)[0] = RangeStart;
-
-            return new IPAddressRange(new IPAddress(buffer), RangeSize);
-        }
-    }
+    public IPAddressRange Range => new(IntToAddress(RangeStart), RangeSize);
 
     private readonly TUint RangeStart;
     private readonly uint RangeSize;
@@ -74,14 +64,7 @@ public abstract class BaseIpAllocator<TUint> where TUint : struct, IBinaryIntege
     {
         var newAddressInteger = RangeStart + TUint.CreateTruncating(index % RangeSize);
 
-        var buffer = MemoryMarshal.Cast<TUint, byte>(MemoryMarshal.CreateSpan(ref newAddressInteger, 1));
-
-        if (BitConverter.IsLittleEndian)
-        {
-            buffer.Reverse();
-        }
-
-        return new IPAddress(buffer);
+        return IntToAddress(newAddressInteger);
     }
 
     private static TUint AddressToInt(IPAddress address)
@@ -96,5 +79,17 @@ public abstract class BaseIpAllocator<TUint> where TUint : struct, IBinaryIntege
         }
 
         return MemoryMarshal.Cast<byte, TUint>(buffer)[0];
+    }
+
+    private static IPAddress IntToAddress(TUint address)
+    {
+        var buffer = MemoryMarshal.Cast<TUint, byte>(MemoryMarshal.CreateSpan(ref address, 1));
+
+        if (BitConverter.IsLittleEndian)
+        {
+            buffer.Reverse();
+        }
+
+        return new IPAddress(buffer);
     }
 }

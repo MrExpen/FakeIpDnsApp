@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Net;
 using System.Net.Sockets;
-using System.Numerics;
-using System.Runtime.CompilerServices;
 using Google.Protobuf;
 
 namespace FakeIpRouting.Extensions;
@@ -28,16 +26,6 @@ public static class IpAddressExtensions
             }
 
             return ByteString.CopyFrom(buffer);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public BigInteger ToBigInteger()
-        {
-            Span<byte> buffer = stackalloc byte[ip.BufferSize];
-
-            ip.TryWriteBytes(buffer, out _);
-
-            return new BigInteger(buffer, isBigEndian: true);
         }
     }
 }

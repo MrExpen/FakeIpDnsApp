@@ -11,15 +11,14 @@ using System.Threading.Tasks;
 using DnsServerCore.ApplicationCommon;
 using FakeIpRouting.Allocators;
 using FakeIpRouting.Extensions;
-using Grpc.Net.Client;
-using IpGrpcMap;
+using FakeIpRouting.Services;
 using TechnitiumLibrary;
 using TechnitiumLibrary.Net.Dns;
 using TechnitiumLibrary.Net.Dns.ResourceRecords;
 
 namespace FakeIpRouting;
 
-public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
+public sealed class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
 {
     private static readonly JsonDocumentOptions JsonParseOptions = new()
         { CommentHandling = JsonCommentHandling.Skip };
@@ -29,9 +28,7 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
     private bool Disable;
     private bool Cache;
 
-    private string GrpcAgentAddress = null!;
-    private GrpcChannel? Channel;
-    private IpMapper.IpMapperClient IpMapper = null!;
+    private IIpMap? IpMap;
 
     private bool IgnoreCase;
     private uint MaxTtl;
@@ -64,10 +61,23 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
         Disable = jsonConfig.GetPropertyValue("disable", false);
         Cache = jsonConfig.GetPropertyValue("cache", true);
 
-        GrpcAgentAddress = jsonConfig.GetPropertyValue("grpcAgentAddress", "http://127.0.0.1:5000");
-        Channel?.Dispose();
-        Channel = GrpcChannel.ForAddress(GrpcAgentAddress);
-        IpMapper = new IpMapper.IpMapperClient(Channel);
+        IpMap?.Dispose();
+
+        var grpcAgentAddress = jsonConfig.GetPropertyValue("grpcAgentAddress", null);
+        if (!string.IsNullOrWhiteSpace(grpcAgentAddress))
+        {
+            IpMap = GrpcIpMap.Create(grpcAgentAddress);
+        }
+        else
+        {
+            IpMap = new LocalNftIpMap(
+                new DnsServerLogger(dnsServer),
+                jsonConfig.GetPropertyValue("ipv4TableName", "vpn"),
+                jsonConfig.GetPropertyValue("ipv6TableName", "vpn"),
+                jsonConfig.GetPropertyValue("ipv4MapName", "fakeip_map"),
+                jsonConfig.GetPropertyValue("ipv6MapName", "fakeip6_map")
+            );
+        }
 
         MaxTtl = jsonConfig.GetPropertyValue("maxTtl", 3600u);
         IgnoreCase = jsonConfig.GetPropertyValue("ignoreCase", true);
@@ -298,33 +308,20 @@ public class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
     ) where TUnit : struct, IBinaryInteger<TUnit>
     {
         var realIpArray = readIp.ToArray();
-        var address = allocator.Allocate((uint)realIpArray.Length);
+        var fakeAddresses = allocator.Allocate((uint)realIpArray.Length);
 
-        await MapFakeToRealIpAsync(address, realIpArray, ttl, cancellationToken);
+        var mappings = fakeAddresses.Zip(realIpArray)
+            .Select(x => new KeyValuePair<IPAddress, IPAddress>(x.First, x.Second))
+            .ToArray();
 
-        return address;
-    }
+        await IpMap.CreateMappingsAsync(mappings, ttl, cancellationToken);
 
-    private async Task MapFakeToRealIpAsync(
-        IEnumerable<IPAddress> fake,
-        IEnumerable<IPAddress> real,
-        uint ttl,
-        CancellationToken cancellationToken = default
-    )
-    {
-        await IpMapper.MapIpMultipleAsync(
-            new MapIpMultipleRequest
-            {
-                FakeIps = { fake.Select(x => x.ToByteString()) },
-                RealIps = { real.Select(x => x.ToByteString()) },
-                Ttl = ttl
-            },
-            cancellationToken: cancellationToken);
+        return fakeAddresses;
     }
 
     public void Dispose()
     {
-        Channel?.Dispose();
+        IpMap?.Dispose();
     }
 
     public string Description => "Allocate ip for resources in fake range.";
