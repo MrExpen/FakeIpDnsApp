@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Net;
 using System.Net.Sockets;
+using System.Numerics;
+using FakeIpRouting.Extensions;
 
 namespace FakeIpRouting;
 
@@ -8,9 +10,9 @@ public class IPAddressRange : IEquatable<IPAddressRange>
 {
     public IPAddress Begin { get; }
 
-    public long AddressCount { get; }
+    public BigInteger AddressCount { get; }
 
-    internal IPAddressRange(IPAddress begin, long addressCount)
+    internal IPAddressRange(IPAddress begin, BigInteger addressCount)
     {
         Begin = begin;
         AddressCount = addressCount;
@@ -18,10 +20,29 @@ public class IPAddressRange : IEquatable<IPAddressRange>
 
     public static IPAddressRange Parse(ReadOnlySpan<char> value)
     {
-        var indexOf = value.IndexOf('/');
+        var indexOfSeparator = value.IndexOfAny("-/");
 
-        var ip = IPAddress.Parse(value[..indexOf]);
-        var hostLength = int.Parse(value[(indexOf + 1)..]);
+        if (indexOfSeparator < 0)
+        {
+            throw new FormatException();
+        }
+
+        return value[indexOfSeparator] switch
+        {
+            '/' => ParseCidr(indexOfSeparator, value),
+            '-' => ParseRange(indexOfSeparator, value),
+            _ => throw new FormatException()
+        };
+    }
+
+    /// <summary>
+    /// <example>198.18.0.0/15</example>
+    /// <example>2001:db8::/96</example>
+    /// </summary>
+    private static IPAddressRange ParseCidr(int indexOfSeparator, ReadOnlySpan<char> value)
+    {
+        var ip = IPAddress.Parse(value[..indexOfSeparator]);
+        var hostLength = int.Parse(value[(indexOfSeparator + 1)..]);
 
         var addressLength = ip.AddressFamily switch
         {
@@ -54,7 +75,39 @@ public class IPAddressRange : IEquatable<IPAddressRange>
 
         buffer[^index] &= (byte)(0b11111111 << maskLength);
 
-        return new IPAddressRange(new IPAddress(buffer), 1L << (addressLength - hostLength));
+        return new IPAddressRange(new IPAddress(buffer), BigInteger.One << (addressLength - hostLength));
+    }
+
+    /// <summary>
+    /// <example>198.18.0.0-198.19.255.255</example>
+    /// <example>2001:db8::-2001:db8::ffff:ffff</example>
+    /// </summary>
+    private static IPAddressRange ParseRange(int indexOfSeparator, ReadOnlySpan<char> value)
+    {
+        var begin = IPAddress.Parse(value[..indexOfSeparator]);
+        var end = IPAddress.Parse(value[(indexOfSeparator + 1)..]);
+
+        if (begin.AddressFamily != end.AddressFamily)
+        {
+            throw new InvalidOperationException();
+        }
+
+        Span<byte> buffer = stackalloc byte[begin.BufferSize];
+
+        begin.TryWriteBytes(buffer, out _);
+
+        var beginInteger = new BigInteger(buffer, isBigEndian: true);
+
+        end.TryWriteBytes(buffer, out _);
+
+        var endInteger = new BigInteger(buffer, isBigEndian: true);
+
+        if (endInteger < beginInteger)
+        {
+            throw new InvalidOperationException();
+        }
+
+        return new IPAddressRange(begin, endInteger - beginInteger + BigInteger.One);
     }
 
     public bool Equals(IPAddressRange? other)

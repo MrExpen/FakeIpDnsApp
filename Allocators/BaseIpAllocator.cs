@@ -19,10 +19,13 @@ public abstract class BaseIpAllocator<TUint> where TUint : struct, IBinaryIntege
     protected BaseIpAllocator(IPAddressRange range)
     {
         RangeStart = AddressToInt(range.Begin);
-        checked
+        if (range.AddressCount > uint.MaxValue)
         {
-            RangeSize = (uint)range.AddressCount;
+            throw new NotSupportedException("Ip range is too big. For ipv6 supported cidr >= 96");
         }
+
+        RangeSize = (uint)range.AddressCount;
+
 
         Counter = 0U;
     }
