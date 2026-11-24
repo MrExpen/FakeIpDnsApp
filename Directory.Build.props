@@ -4,7 +4,7 @@
     <!--
       This app is a DNS App plugin for the Technitium DNS Server.
       Only .NET 10 is supported: the code uses C# 14 extension members and the plugin
-      contract (DnsServerCore.ApplicationCommon 10.0) of Dns Server 15.x.
+      contract of Dns Server 15.x (DnsServerCore.ApplicationCommon 10.x - 10.2 in 15.6.x).
       Older Dns Server releases (.NET 8 / .NET 9) are intentionally not supported.
     -->
     <TargetFramework>net10.0</TargetFramework>
