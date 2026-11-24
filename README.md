@@ -30,8 +30,38 @@ dotnet build FakeIpDnsApp.sln -c Release
 .\build\package.ps1     # -> dist\FakeIpDnsApp-<version>.zip
 ```
 
-`get-libs.ps1` клонирует upstream-репозитории по тегам из `versions.json` и складывает в `libs\` три DLL:
-`DnsServerCore.ApplicationCommon.dll`, `TechnitiumLibrary.dll`, `TechnitiumLibrary.Net.dll`.
+### Версии зависимостей (`versions.json`)
+
+```json
+{
+    "dnsServerTag": "v15.2.0",
+    "technitiumLibraryTag": "dns-server-v15.2.0",
+    "targetFramework": "net10.0"
+}
+```
+
+Здесь лежат полные имена тегов upstream-репозиториев — ровно такие, какие они в самих репозиториях, скрипт ничего
+не придумывает и не склеивает. У TechnitiumLibrary своей нумерации нет: его теги названы по релизу DNS Server,
+поэтому в его теге уже сидит префикс `dns-server-`. Оба тега должны относиться к одному релизу и к той версии
+DNS Server, на которую вы ставите приложение.
+
+```powershell
+.\build\get-libs.ps1                          # теги из versions.json
+.\build\get-libs.ps1 -DryRun                  # показать эти теги и проверить, что они есть upstream
+.\build\get-libs.ps1 -ReleaseVersion v15.3.0  # сдвинуть оба тега на другой релиз одним параметром
+.\build\get-libs.ps1 -DnsServerTag v15.3.0    # отдельно взять другой тег DnsServer
+.\build\get-libs.ps1 -LibraryTag dns-server-v15.1.0   # отдельно взять другой тег TechnitiumLibrary
+```
+
+`-ReleaseVersion v15.3.0` меняет только номер версии внутри каждого тега: `v15.2.0` → `v15.3.0`, а
+`dns-server-v15.2.0` → `dns-server-v15.3.0` (префикс сохраняется).
+
+Имя тега проверяется по маске (опциональный строчный префикс + `vMAJOR.MINOR.PATCH`), несуществующий тег
+сообщается до клонирования со списком последних тегов репозитория. Если репозиторий уже скачан в `.deps\`, скрипт
+добирает нужный тег и переключает рабочую копию на него — старая версия по ошибке не останется.
+
+После `get-libs.ps1` в `libs\` лежат три DLL: `DnsServerCore.ApplicationCommon.dll`, `TechnitiumLibrary.dll`,
+`TechnitiumLibrary.Net.dll`.
 
 Все три ссылки в `.csproj` объявлены как `<Reference>` с `Private=false`: DLL нужны только чтобы скомпилироваться.
 В рантайме их предоставляет сам DNS Server. **Никогда не кладите эти DLL рядом с DLL приложения** — DNS-сервер
