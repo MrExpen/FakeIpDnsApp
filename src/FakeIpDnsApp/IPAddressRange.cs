@@ -1,10 +1,10 @@
-﻿using System;
+using System;
 using System.Net;
 using System.Net.Sockets;
 using System.Numerics;
-using FakeIpRouting.Extensions;
+using FakeIpDnsApp.Extensions;
 
-namespace FakeIpRouting;
+namespace FakeIpDnsApp;
 
 public class IPAddressRange : IEquatable<IPAddressRange>
 {

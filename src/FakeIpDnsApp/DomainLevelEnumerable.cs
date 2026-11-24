@@ -1,6 +1,6 @@
-﻿using System;
+using System;
 
-namespace FakeIpRouting;
+namespace FakeIpDnsApp;
 
 public readonly struct DomainLevelEnumerable(string domain)
 {

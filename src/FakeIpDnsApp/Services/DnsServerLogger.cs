@@ -1,6 +1,6 @@
-﻿using DnsServerCore.ApplicationCommon;
+using DnsServerCore.ApplicationCommon;
 
-namespace FakeIpRouting.Services;
+namespace FakeIpDnsApp.Services;
 
 public class DnsServerLogger : ILogger
 {

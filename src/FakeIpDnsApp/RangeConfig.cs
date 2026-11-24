@@ -1,6 +1,6 @@
-﻿using FakeIpRouting.Allocators;
+using FakeIpDnsApp.Allocators;
 
-namespace FakeIpRouting;
+namespace FakeIpDnsApp;
 
 public class RangeConfig
 {

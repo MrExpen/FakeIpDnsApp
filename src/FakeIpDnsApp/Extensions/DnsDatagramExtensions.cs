@@ -1,8 +1,8 @@
-﻿using System.IO;
+using System.IO;
 using System.Text.Json;
 using TechnitiumLibrary.Net.Dns;
 
-namespace FakeIpRouting.Extensions;
+namespace FakeIpDnsApp.Extensions;
 
 public static class DnsDatagramExtensions
 {

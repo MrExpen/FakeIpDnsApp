@@ -1,6 +1,6 @@
-﻿using System;
+using System;
 
-namespace FakeIpRouting.Allocators;
+namespace FakeIpDnsApp.Allocators;
 
 public sealed class Ipv6AllocatorFactory : BaseIpAllocatorFactory<Ipv6Allocator, UInt128>
 {

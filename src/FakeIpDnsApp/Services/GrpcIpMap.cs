@@ -1,13 +1,13 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
-using FakeIpRouting.Extensions;
+using FakeIpDnsApp.Extensions;
 using Grpc.Net.Client;
 using IpGrpcMap;
 
-namespace FakeIpRouting.Services;
+namespace FakeIpDnsApp.Services;
 
 public sealed class GrpcIpMap : IIpMap
 {

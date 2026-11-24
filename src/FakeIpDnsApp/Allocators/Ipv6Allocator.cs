@@ -1,8 +1,8 @@
-﻿using System;
+using System;
 using System.Net;
 using System.Net.Sockets;
 
-namespace FakeIpRouting.Allocators;
+namespace FakeIpDnsApp.Allocators;
 
 public sealed class Ipv6Allocator : BaseIpAllocator<UInt128>
 {

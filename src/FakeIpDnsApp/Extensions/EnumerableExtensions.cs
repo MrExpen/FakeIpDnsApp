@@ -1,7 +1,7 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 
-namespace FakeIpRouting.Extensions;
+namespace FakeIpDnsApp.Extensions;
 
 public static class EnumerableExtensions
 {

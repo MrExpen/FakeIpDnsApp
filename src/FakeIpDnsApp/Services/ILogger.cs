@@ -1,4 +1,4 @@
-﻿namespace FakeIpRouting.Services;
+namespace FakeIpDnsApp.Services;
 
 public interface ILogger
 {

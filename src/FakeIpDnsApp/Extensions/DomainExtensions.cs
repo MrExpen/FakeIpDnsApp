@@ -1,4 +1,4 @@
-﻿namespace FakeIpRouting.Extensions;
+namespace FakeIpDnsApp.Extensions;
 
 public static class DomainExtensions
 {

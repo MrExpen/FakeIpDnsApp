@@ -1,7 +1,7 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Numerics;
 
-namespace FakeIpRouting.Allocators;
+namespace FakeIpDnsApp.Allocators;
 
 public abstract class BaseIpAllocatorFactory<TAllocator, TUint> where TAllocator : BaseIpAllocator<TUint>
     where TUint : struct, IBinaryInteger<TUint>

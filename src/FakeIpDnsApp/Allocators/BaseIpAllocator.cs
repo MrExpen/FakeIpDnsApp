@@ -1,11 +1,11 @@
-﻿using System;
+using System;
 using System.Net;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 
-namespace FakeIpRouting.Allocators;
+namespace FakeIpDnsApp.Allocators;
 
 public abstract class BaseIpAllocator<TUint> where TUint : struct, IBinaryInteger<TUint>
 {

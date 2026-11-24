@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
@@ -9,16 +9,16 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using DnsServerCore.ApplicationCommon;
-using FakeIpRouting.Allocators;
-using FakeIpRouting.Extensions;
-using FakeIpRouting.Services;
+using FakeIpDnsApp.Allocators;
+using FakeIpDnsApp.Extensions;
+using FakeIpDnsApp.Services;
 using TechnitiumLibrary;
 using TechnitiumLibrary.Net.Dns;
 using TechnitiumLibrary.Net.Dns.ResourceRecords;
 
-namespace FakeIpRouting;
+namespace FakeIpDnsApp;
 
-public sealed class FakeIpRoutingApp : IDnsApplication, IDnsPostProcessor
+public sealed class App : IDnsApplication, IDnsPostProcessor
 {
     private static readonly JsonDocumentOptions JsonParseOptions = new()
         { CommentHandling = JsonCommentHandling.Skip };
