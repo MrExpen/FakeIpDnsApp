@@ -4,6 +4,18 @@
 Версия намеренно продолжает нумерацию приложения в форке `DnsFakeIpServer` (`4.2.6`), чтобы DNS Server считал
 сборки из этого репозитория более новыми, чем уже установленные.
 
+## [4.2.8] - 2026-11-25
+
+### Changed
+
+- Зависимости хоста подняты до Technitium DNS Server 15.6.2: `dnsServerTag` = `v15.6.2`,
+  `technitiumLibraryTag` = `dns-server-v15.6.2`. Собранные ссылки: `DnsServerCore.ApplicationCommon` 10.2,
+  `TechnitiumLibrary` 7.2, `TechnitiumLibrary.Net` 15.2.1.
+- Код приложения под новую версию не менялся: интерфейсы `IDnsApplication` и `IDnsPostProcessor` между 15.2.0 и
+  15.6.2 идентичны, новые члены появились только у `IDnsServer` (`DirectQueryAsync` с `IPEndPoint`,
+  `IsLocallyServedZone`, `WriteLog(message, ex)`), а её приложение только использует. Предупреждения `CS8625` на
+  передачу `null` в `GetPropertyValue` исчезли, осталось одно `CS8602` в `App.cs`.
+
 ## [4.2.7] - 2026-11-25
 
 ### Added

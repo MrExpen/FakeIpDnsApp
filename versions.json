@@ -1,6 +1,6 @@
 {
-    "dnsServerTag": "v15.2.0",
-    "technitiumLibraryTag": "dns-server-v15.2.0",
+    "dnsServerTag": "v15.6.2",
+    "technitiumLibraryTag": "dns-server-v15.6.2",
     "targetFramework": "net10.0",
     "comment": "Full tag names of the upstream repositories, exactly as they are spelled there. TechnitiumLibrary has no numbering of its own: its tags are named after the DNS Server release that used them, so its tag carries the 'dns-server-' prefix. Keep both tags on the same release. The app needs a DNS Server build that runs on .NET 10 (DNS Server 15.x); older releases are not supported."
 }

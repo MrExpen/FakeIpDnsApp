@@ -2,7 +2,7 @@
 
     <PropertyGroup>
         <!-- TargetFramework, LangVersion, Nullable and output layout come from Directory.Build.props -->
-        <Version>4.2.7</Version>
+        <Version>4.2.8</Version>
         <Authors>Chibrikov DS</Authors>
         <AssemblyName>FakeIpDnsApp</AssemblyName>
         <RootNamespace>FakeIpDnsApp</RootNamespace>
