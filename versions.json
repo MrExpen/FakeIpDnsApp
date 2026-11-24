@@ -1,0 +1,7 @@
+{
+    "dnsServer": "v15.2",
+    "technitiumLibrary": "v14.1.1",
+    "applicationCommon": "10.0",
+    "targetFramework": "net10.0",
+    "comment": "Reference assemblies are pinned to these upstream tags by build/get-libs.ps1. The app requires a DNS Server build with .NET 10 (Dns Server 15.x); older releases are not supported."
+}

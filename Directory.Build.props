@@ -1,0 +1,30 @@
+<Project>
+
+  <PropertyGroup>
+    <!--
+      This app is a DNS App plugin for the Technitium DNS Server.
+      Only .NET 10 is supported: the code uses C# 14 extension members and the plugin
+      contract (DnsServerCore.ApplicationCommon 10.0) of Dns Server 15.x.
+      Older Dns Server releases (.NET 8 / .NET 9) are intentionally not supported.
+    -->
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!--
+    Folder that holds the prebuilt third-party DLLs used for compilation only:
+      DnsServerCore.ApplicationCommon.dll, TechnitiumLibrary.dll, TechnitiumLibrary.Net.dll
+    Run build/get-libs.ps1 to fill it, or override it:
+      dotnet build -p:LibDir="C:\Program Files\DnsServerApp"
+  -->
+  <PropertyGroup>
+    <LibDir Condition="'$(LibDir)' == ''">$(MSBuildThisFileDirectory)libs\</LibDir>
+  </PropertyGroup>
+
+</Project>
