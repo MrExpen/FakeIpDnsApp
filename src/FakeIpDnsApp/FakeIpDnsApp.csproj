@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <!-- TargetFramework, LangVersion, Nullable and output layout come from Directory.Build.props -->
+        <Version>4.2.7</Version>
+        <Authors>Chibrikov DS</Authors>
+        <AssemblyName>FakeIpDnsApp</AssemblyName>
+        <RootNamespace>FakeIpDnsApp</RootNamespace>
+        <OutputType>Library</OutputType>
+        <Description>Allocate ip for resources in fake range.</Description>
+        <RepositoryUrl>https://github.com/MrExpen/FakeIpDnsApp</RepositoryUrl>
+    </PropertyGroup>
+
+    <!--
+        Host contracts are compile-time references only. The DNS Server keeps DnsServerCore.ApplicationCommon
+        and TechnitiumLibrary in its default load context and injects them into the application load context of
+        the plugin, so these assemblies must never be shipped next to the plugin dll: a second copy would be
+        loaded into the plugin context and the "is IDnsApplication" check would fail.
+        Run build\get-libs.ps1 to fill libs\ before building for the first time.
+    -->
+    <ItemGroup>
+        <Reference Include="DnsServerCore.ApplicationCommon">
+            <HintPath>$(LibDir)DnsServerCore.ApplicationCommon.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="TechnitiumLibrary">
+            <HintPath>$(LibDir)TechnitiumLibrary.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="TechnitiumLibrary.Net">
+            <HintPath>$(LibDir)TechnitiumLibrary.Net.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Google.Protobuf" Version="3.35.1" />
+        <PackageReference Include="Grpc.Net.Client" Version="2.80.0" />
+        <PackageReference Include="Grpc.Tools" Version="2.80.0">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Protobuf Include="Protos\ipMap.proto" GrpcServices="Client" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Update="dnsApp.config">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+
+</Project>

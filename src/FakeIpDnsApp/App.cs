@@ -25,7 +25,7 @@ public sealed class App : IDnsApplication, IDnsPostProcessor
 
     private IDnsServer DnsServer = null!;
 
-    private bool Disable;
+    private bool Disabled;
     private bool Cache;
 
     private IIpMap? IpMap;
@@ -58,7 +58,7 @@ public sealed class App : IDnsApplication, IDnsPostProcessor
             }
         }
 
-        Disable = jsonConfig.GetPropertyValue("disable", false);
+        Disabled = jsonConfig.GetPropertyValue("disabled", false);
         Cache = jsonConfig.GetPropertyValue("cache", true);
 
         IpMap?.Dispose();
@@ -139,7 +139,7 @@ public sealed class App : IDnsApplication, IDnsPostProcessor
         DnsDatagram response
     )
     {
-        if (Disable)
+        if (Disabled)
         {
             return response;
         }
