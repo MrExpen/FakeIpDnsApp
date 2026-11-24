@@ -24,9 +24,9 @@ $root    = Split-Path -Parent $PSScriptRoot
 $depsDir = Join-Path $root '.deps'
 $libsDir = Join-Path $root 'libs'
 
-$pin = Get-Content (Join-Path $root 'versions.json') -Raw | ConvertFrom-Json
-$dnsTag  = $pin.dnsServer
-$libTag  = $pin.technitiumLibrary
+$pin    = Get-Content (Join-Path $root 'versions.json') -Raw | ConvertFrom-Json
+$dnsTag = $pin.dnsServerTag
+$libTag = $pin.technitiumLibraryTag
 
 New-Item -ItemType Directory -Path $libsDir -Force | Out-Null
 
