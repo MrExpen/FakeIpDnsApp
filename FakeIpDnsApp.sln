@@ -1,8 +1,14 @@
-Microsoft Visual Studio Solution File, Format Version 12.00
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FakeIpDnsApp", "src\FakeIpDnsApp\FakeIpDnsApp.csproj", "{3f4c2a1b-8d5e-4c7a-9b6f-1e2d3a4c5b67}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FakeIpDnsApp", "src\FakeIpDnsApp\FakeIpDnsApp.csproj", "{3F4C2A1B-8D5E-4C7A-9B6F-1E2D3A4C5B67}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Scripts", "Scripts", "{3FC89C87-FADE-43DD-861E-2B40C4AC32B9}"
+	ProjectSection(SolutionItems) = preProject
+		build\get-libs.ps1 = build\get-libs.ps1
+		build\package.ps1 = build\package.ps1
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
