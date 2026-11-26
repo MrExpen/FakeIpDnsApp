@@ -218,7 +218,7 @@ public sealed class App : IDnsApplication, IDnsPostProcessor
                     .TakeIfNotZero(config.MaxIpv4AddressesPerDomain)
                     .ToArray();
 
-                var fakeIpv4 = await AllocateAndMapIpAddress(
+                var leaseIpv4 = await AllocateAndMapIpAddress(
                     config.Ipv4Allocator!,
                     aRecords.Select(x => x.Record!.Address),
                     MaxTtl
@@ -226,7 +226,7 @@ public sealed class App : IDnsApplication, IDnsPostProcessor
 
                 answers =
                 [
-                    .. fakeIpv4.Zip(aRecords)
+                    .. leaseIpv4.Zip(aRecords)
                         .Select(zip => new DnsResourceRecord(
                             domain,
                             DnsResourceRecordType.A,
@@ -244,7 +244,7 @@ public sealed class App : IDnsApplication, IDnsPostProcessor
                     .TakeIfNotZero(config.MaxIpv6AddressesPerDomain)
                     .ToArray();
 
-                var fakeIpv6 = await AllocateAndMapIpAddress(
+                var leaseIpv6 = await AllocateAndMapIpAddress(
                     config.Ipv6Allocator!,
                     aaaaRecords.Select(x => x.Record!.Address),
                     MaxTtl
@@ -252,7 +252,7 @@ public sealed class App : IDnsApplication, IDnsPostProcessor
 
                 answers =
                 [
-                    .. fakeIpv6.Zip(aaaaRecords)
+                    .. leaseIpv6.Zip(aaaaRecords)
                         .Select(zip => new DnsResourceRecord(
                             domain,
                             DnsResourceRecordType.AAAA,
@@ -300,7 +300,7 @@ public sealed class App : IDnsApplication, IDnsPostProcessor
         return false;
     }
 
-    private async Task<IPAddress[]> AllocateAndMapIpAddress<TUnit>(
+    private async Task<IpLease<TUnit>> AllocateAndMapIpAddress<TUnit>(
         BaseIpAllocator<TUnit> allocator,
         IEnumerable<IPAddress> readIp,
         uint ttl,
@@ -308,15 +308,25 @@ public sealed class App : IDnsApplication, IDnsPostProcessor
     ) where TUnit : struct, IBinaryInteger<TUnit>
     {
         var realIpArray = readIp.ToArray();
-        var fakeAddresses = allocator.Allocate((uint)realIpArray.Length);
+        var lease = allocator.Allocate((uint)realIpArray.Length);
 
-        var mappings = fakeAddresses.Zip(realIpArray)
-            .Select(x => new KeyValuePair<IPAddress, IPAddress>(x.First, x.Second))
-            .ToArray();
+        try
+        {
+            var mappings = lease.Zip(realIpArray)
+                .Select(x => new KeyValuePair<IPAddress, IPAddress>(x.First, x.Second))
+                .ToArray();
 
-        await IpMap.CreateMappingsAsync(mappings, ttl, cancellationToken);
+            await IpMap!.CreateMappingsAsync(mappings, ttl, cancellationToken);
+        }
+        catch
+        {
+            // Маппинг не создан, значит адреса никому не отдали: пробуем вернуть их в пул.
+            // Вернутся только те, что никто не успел арендовать после нас.
+            allocator.TryReturn(lease);
+            throw;
+        }
 
-        return fakeAddresses;
+        return lease;
     }
 
     public void Dispose()
