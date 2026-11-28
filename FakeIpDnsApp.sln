@@ -4,6 +4,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FakeIpDnsApp", "src\FakeIpDnsApp\FakeIpDnsApp.csproj", "{3F4C2A1B-8D5E-4C7A-9B6F-1E2D3A4C5B67}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "FakeIpDnsApp.Tests", "tests\FakeIpDnsApp.Tests\FakeIpDnsApp.Tests.csproj", "{B7D6C3A2-4E1F-4C8A-9D2B-6A5F3E4D7C11}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Scripts", "Scripts", "{3FC89C87-FADE-43DD-861E-2B40C4AC32B9}"
 	ProjectSection(SolutionItems) = preProject
 		build\get-libs.ps1 = build\get-libs.ps1
@@ -20,6 +22,10 @@ Global
 		{3f4c2a1b-8d5e-4c7a-9b6f-1e2d3a4c5b67}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3f4c2a1b-8d5e-4c7a-9b6f-1e2d3a4c5b67}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3f4c2a1b-8d5e-4c7a-9b6f-1e2d3a4c5b67}.Release|Any CPU.Build.0 = Release|Any CPU
+		{b7d6c3a2-4e1f-4c8a-9d2b-6a5f3e4d7c11}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{b7d6c3a2-4e1f-4c8a-9d2b-6a5f3e4d7c11}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{b7d6c3a2-4e1f-4c8a-9d2b-6a5f3e4d7c11}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{b7d6c3a2-4e1f-4c8a-9d2b-6a5f3e4d7c11}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

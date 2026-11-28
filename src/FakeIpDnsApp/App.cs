@@ -218,6 +218,13 @@ public sealed class App : IDnsApplication, IDnsPostProcessor
                     .TakeIfNotZero(config.MaxIpv4AddressesPerDomain)
                     .ToArray();
 
+                if (aRecords.Length == 0)
+                {
+                    // в ответе нет ни одной A-записи (например, только CNAME): подменять нечего,
+                    // иначе клиент получил бы NOERROR с пустым ANSWER
+                    return response;
+                }
+
                 var leaseIpv4 = await AllocateAndMapIpAddress(
                     config.Ipv4Allocator!,
                     aRecords.Select(x => x.Record!.Address),
@@ -243,6 +250,12 @@ public sealed class App : IDnsApplication, IDnsPostProcessor
                     .Where(x => x.Record is not null)
                     .TakeIfNotZero(config.MaxIpv6AddressesPerDomain)
                     .ToArray();
+
+                if (aaaaRecords.Length == 0)
+                {
+                    // та же причина, что и для A: пустая аренда дала бы пустой ответ
+                    return response;
+                }
 
                 var leaseIpv6 = await AllocateAndMapIpAddress(
                     config.Ipv6Allocator!,

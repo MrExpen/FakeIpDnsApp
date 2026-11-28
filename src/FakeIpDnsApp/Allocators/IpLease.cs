@@ -42,6 +42,8 @@ public readonly record struct IpLease<TUint>(TUint StartAddress, uint Count)
         }
     }
 
+    // Количество адресов аренды не может превышать BaseIpAllocator.MaxRangeSize = int.MaxValue,
+    // поэтому приведение к int безопасно.
     int IReadOnlyCollection<IPAddress>.Count => (int)Count;
 
     /// <summary>

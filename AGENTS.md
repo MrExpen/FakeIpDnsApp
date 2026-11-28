@@ -24,21 +24,26 @@
 | Сдвинуть оба тега на другой релиз | `.\build\get-libs.ps1 -ReleaseVersion v15.6.1` |
 | Взять другой тег отдельно | `-DnsServerTag v15.6.1` / `-LibraryTag dns-server-v15.6.1` |
 | Сборка | `dotnet build FakeIpDnsApp.sln -c Release` |
+| Тесты аллокаторов и диапазонов | `dotnet test FakeIpDnsApp.sln -c Release` |
 | Архив для установки | `.\build\package.ps1` (`-SkipBuild`, `-Version 4.2.9`) |
 | Собираться против установленного сервера | `dotnet build -p:LibDir="C:\Program Files\DnsServerApp"` |
 
-Тестов и CI **нет**. Проверка изменений = чистая сборка + `package.ps1` + прогон на сервере. Сейчас
-`dotnet build -c Release` (SDK 10.0.301, `libs\` заполнен) даёт **0 warnings, 0 errors**; держите эту планку.
+Тесты **есть** (`dotnet test FakeIpDnsApp.sln -c Release`, проект `tests/FakeIpDnsApp.Tests`, xunit): кольцо
+аллокатора, `IpLease`, фабрики аллокаторов и `IPAddressRange`. Покрытые тестами модули не ссылаются на хостовые
+DLL, поэтому тесты собираются без `libs\`. CI **нет**. Проверка изменений = тесты + чистая сборка +
+`package.ps1` + прогон на сервере. Сейчас `dotnet build -c Release` (SDK 10.0.301, `libs\` заполнен) даёт
+**0 warnings, 0 errors**; держите эту планку.
 
-Полный прогон недоступен с Windows-машины в режиме `nft`: `nft` — это Linux. Локально проверяется только
-компиляция и состав архива.
+`App.cs`, `Services/` и `Protos/` тестами не покрыты: `App` требует `IDnsServer`, `LocalNftIpMap` требует `nft`, а
+`nft` — это Linux. `GrpcIpMap` проверяется только на сервере с агентом. Полный прогон недоступен с
+Windows-машины в режиме `nft`: локально проверяются компиляция, тесты и состав архива.
 
 ## Карта репозитория
 
 ```
 Directory.Build.props      net10.0, C# 14, Nullable, ImplicitUsings=disable, LibDir, плоский путь вывода
 versions.json             пины тегов upstream (dnsServerTag, technitiumLibraryTag)
-FakeIpDnsApp.sln          один csproj + solution folder Scripts
+FakeIpDnsApp.sln          основной csproj, тестовый проект и solution folder Scripts
 build/get-libs.ps1        клонирует теги в .deps/, собирает их, кладёт DLL в libs/
 build/package.ps1         dotnet publish -> dist/FakeIpDnsApp-<version>.zip (плоский)
 src/FakeIpDnsApp/
@@ -53,6 +58,8 @@ src/FakeIpDnsApp/
   Services/               IIpMap, LocalNftIpMap (nft CLI), GrpcIpMap (gRPC), ILogger,
                           DnsServerLogger, NullLogger
   Protos/ipMap.proto      контракт агента (csharp_namespace = IpGrpcMap)
+tests/FakeIpDnsApp.Tests/ xunit-тесты: Support/TestRanges.cs (помощники), IPAddressRangeTests.cs и
+                          Allocators/ (кольцо, TryReturn, IpLease, фабрики, многопоточность)
 libs/                     собранные хостовые DLL (gitignored) — их нужно иметь до первой сборки
 .deps/                    клонированные upstream-репозитории по тегам (gitignored)
 ```
@@ -95,7 +102,12 @@ detached checkout на теге и при смене версии переклю
    и не выводится, кроме `-ReleaseVersion`, который меняет только `vMAJOR.MINOR.PATCH` внутри уже готового тега.
 6. **Аллокатор lock-free**: `Volatile.Read` + `Interlocked.CompareExchange` по одному счётчику-кольцу,
    `TryReturn` — best-effort по определению. Не заменять на `lock`/`Monitor`/`ConcurrentQueue`; не хранить
-   «конец аренды» — он выводится арифметикой из `IpLease(StartAddress, Count)`.
+   «конец аренды» — он выводится арифметикой из `IpLease(StartAddress, Count)`. Кольцо выдаёт адреса строго
+   последовательно по кругу: интервал никогда не придвигается к концу диапазона (если остатка не хватает,
+   арендуется остаток), поэтому один адрес не выдаётся дважды за виток. Проверка — тест
+   `Allocate_IssuedAddressesFollowRingOrder_WithoutSkipsOrRepeats`. Диапазон крупнее
+   `BaseIpAllocator.MaxRangeSize` (`int.MaxValue` адресов) конструктор отвергает — это держит количество адресов
+   аренды внутри `int`.
 7. **`nft`-таблицу и maps создаёт оператор.** Приложение делает только `add element` / `delete element`
    (`table inet <ipv4TableName>`, map `<ipv4MapName>`); само создание таблиц сюда не добавлять.
    Параметр `ttl` в `LocalNftIpMap` не используется — время жизни записи в `nft` здесь не задаётся.
@@ -132,7 +144,9 @@ detached checkout на теге и при смене версии переклю
 - `disabled` (корневой) и `disabled` внутри элемента `configs[]` — разные вещи; корневой читается как `disabled`
   (исторический баг с `disable` исправлен в 4.2.7).
 - `maxTtl` ограничивает TTL ответа **и** уезжает в gRPC-агенту; в `nft`-режиме игнорируется (см. инвариант 7).
-- IPv6-диапазон должен быть не крупнее `/96`: больше `uint.MaxValue` адресов — `NotSupportedException`.
+- Размер диапазона ограничен `int.MaxValue` адресов — это `BaseIpAllocator.MaxRangeSize`, чтобы количество
+  адресов аренды всегда помещалось в `int`. Крупнейший CIDR — `/2` для IPv4 и `/98` для IPv6: `/1` и `/97` —
+  ровно `2^31` адресов, на один больше лимита; `0.0.0.0/0` и `::/0` отвергаются.
 - `ipV6Range: "fc00::/110"` — безопасный пример, а не рабочая схема (про ULA, приоритеты RFC 6724 и выбор
   собственного `/110` из своего `/48` — раздел «Какой брать диапазон» в README).
 - `logging: true` включает логирование `nft`-действий через `IDnsServer.WriteLog`; в gRPC-режиме не используется.
@@ -141,8 +155,8 @@ detached checkout на теге и при смене версии переклю
 
 - `domains: []` — см. выше (README ↔ `App.cs`).
 - `ttl` не применяется в `LocalNftIpMap`.
-- `DeleteMapping` не проверяет `ExitCode`/stderr: удаление несуществующего элемента — штатная ситуация, а
-  ошибки удаления молча игнорируются.
+- `DeleteMapping` не проверяет `ExitCode`: удаление несуществующего элемента — штатная ситуация, поэтому ошибка
+  удаления молча игнорируется (stderr при этом вычитывается, чтобы не вешать процесс `nft`).
 - `Cache && ответ содержит CNAME` — обходной путь (`Hack for CNAME`) через `DnsServer.DirectQueryAsync` с типом
   `ANY`; он зависит от API DNS Server 15.x и при обновлении хоста его надо перепроверять.
 

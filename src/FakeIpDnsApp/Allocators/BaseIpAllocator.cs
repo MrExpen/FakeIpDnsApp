@@ -7,9 +7,21 @@ namespace FakeIpDnsApp.Allocators;
 
 public abstract class BaseIpAllocator<TUint> where TUint : struct, IBinaryInteger<TUint>
 {
+    /// <summary>
+    /// Максимальный размер диапазона: <see cref="int.MaxValue"/> адресов.
+    /// Лимит нужен не только счётчику кольца: количество адресов аренды уходит в <c>int</c>
+    /// (<see cref="IpLease{TUint}"/> как <see cref="System.Collections.Generic.IReadOnlyCollection{T}"/>,
+    /// индексы в <c>int</c>, длины ответов DNS).
+    /// Крупнейший CIDR, который ещё проходит: <c>/2</c> для IPv4 и <c>/98</c> для IPv6 -
+    /// <c>/1</c> и <c>/97</c> это уже 2^31 адресов, на один больше лимита.
+    /// </summary>
+    public const int MaxRangeSize = int.MaxValue;
+
     public IPAddressRange Range => new(IpAddressMath.ToAddress(RangeStart), RangeSize);
 
     private readonly TUint RangeStart;
+
+    /// <summary>Количество адресов в диапазоне, никогда не больше <see cref="MaxRangeSize"/>.</summary>
     private readonly uint RangeSize;
 
     /// <summary>
@@ -18,16 +30,23 @@ public abstract class BaseIpAllocator<TUint> where TUint : struct, IBinaryIntege
     /// </summary>
     private uint Counter;
 
+    /// <summary>
+    /// Подготавливает аллокатор диапазона.
+    /// </summary>
+    /// <exception cref="NotSupportedException">Диапазон крупнее <see cref="MaxRangeSize"/> адресов.</exception>
     protected BaseIpAllocator(IPAddressRange range)
     {
         RangeStart = IpAddressMath.ToInt<TUint>(range.Begin);
-        if (range.AddressCount > uint.MaxValue)
+
+        if (range.AddressCount > MaxRangeSize)
         {
-            throw new NotSupportedException("Ip range is too big. For ipv6 supported cidr >= 96");
+            // Крупнее int.MaxValue адресов аллокатор не берётся, см. MaxRangeSize.
+            throw new NotSupportedException(
+                $"Ip range is too big: {range.AddressCount} addresses, supported at most {MaxRangeSize}. " +
+                "IPv4 requires prefix /2 or longer, IPv6 requires prefix /98 or longer.");
         }
 
         RangeSize = (uint)range.AddressCount;
-
 
         Counter = 0U;
     }
@@ -43,9 +62,10 @@ public abstract class BaseIpAllocator<TUint> where TUint : struct, IBinaryIntege
     /// <summary>
     /// Арендует <paramref name="count"/> идущих подряд адресов из пула.
     /// Аренда возвращается в пул только явно через <see cref="TryReturn"/>.
-    /// Интервал аренды всегда целиком лежит внутри диапазона: если до его конца адресов не хватает,
-    /// интервал придвигается к концу диапазона, а следующая аренда начинается с его начала.
-    /// Если адресов просят больше, чем их в диапазоне, выдаётся весь диапазон один раз, без повторов.
+    /// Интервал аренды всегда целиком лежит внутри диапазона и никогда не пересекается с уже выданным:
+    /// если до конца диапазона осталось меньше адресов, чем просят, арендуется остаток, а следующая аренда
+    /// начинается с начала диапазона. То есть виток кольца для <c>count</c>, не делящего размер диапазона,
+    /// состоит из аренд разного размера, но каждый адрес диапазона выдаётся ровно один раз за виток.
     /// </summary>
     public IpLease<TUint> Allocate(uint count)
     {
@@ -54,30 +74,21 @@ public abstract class BaseIpAllocator<TUint> where TUint : struct, IBinaryIntege
             return IpLease<TUint>.Empty;
         }
 
-        if (count > RangeSize)
-        {
-            count = RangeSize;
-        }
-
         while (true)
         {
             var current = Volatile.Read(ref Counter);
-            var start = current;
-            var end = (ulong)current + count;
 
-            if (end > RangeSize)
-            {
-                // Интервал придвигается к концу диапазона, чтобы не выходить за его границу,
-                // а следующая аренда начинается заново с его начала.
-                start = RangeSize - count;
-                end = RangeSize;
-            }
+            // Хвост диапазона может быть короче запрошенного интервала: берём ровно сколько осталось.
+            // Придвигать интервал к концу диапазона (start = RangeSize - count) нельзя - он повторно
+            // выдаёт адреса предыдущей аренды, и один фейковый адрес оказывается занят сразу двумя доменами.
+            var length = Math.Min(count, RangeSize - current);
+            var end = current + length; // всегда <= RangeSize, переполнения uint нет
 
-            // Позиция кольца всегда внутри диапазона: конец интервала, дошедший до конца, переносит
+            // Позиция кольца всегда внутри диапазона: интервал, дошедший до конца, переносит
             // следующую аренду в его начало.
-            if (Interlocked.CompareExchange(ref Counter, (uint)(end % RangeSize), current) == current)
+            if (Interlocked.CompareExchange(ref Counter, end == RangeSize ? 0U : end, current) == current)
             {
-                return new IpLease<TUint>(RangeStart + TUint.CreateTruncating(start), count);
+                return new IpLease<TUint>(RangeStart + TUint.CreateTruncating(current), length);
             }
         }
     }

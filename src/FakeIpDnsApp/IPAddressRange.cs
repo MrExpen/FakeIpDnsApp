@@ -51,12 +51,14 @@ public class IPAddressRange : IEquatable<IPAddressRange>
             _ => throw new InvalidOperationException()
         };
 
-        var maskLength = addressLength - hostLength;
-
-        if (hostLength > addressLength)
+        // Префикс вне [0..addressLength] - ошибка конфига. Без проверки отрицательный hostLength
+        // давал маску длиннее адреса и вылет за границу buffer ниже по тексту.
+        if (hostLength < 0 || hostLength > addressLength)
         {
             throw new FormatException();
         }
+
+        var maskLength = addressLength - hostLength;
 
         Span<byte> buffer = stackalloc byte[addressLength / 8];
 
@@ -94,13 +96,22 @@ public class IPAddressRange : IEquatable<IPAddressRange>
 
         Span<byte> buffer = stackalloc byte[begin.BufferSize];
 
-        begin.TryWriteBytes(buffer, out _);
+        if (!begin.TryWriteBytes(buffer, out var written) || written != buffer.Length)
+        {
+            throw new InvalidOperationException("couldn't write address bytes.");
+        }
 
-        var beginInteger = new BigInteger(buffer, isBigEndian: true);
+        // Адреса читаются беззнаково: со знаком 255.255.255.255 превращался в -1, а любой диапазон,
+        // перехватывающий старший бит адреса (128.0.0.0 для IPv4, 8000:: для IPv6),
+        // считался «перевёрнутым» и отвергался.
+        var beginInteger = new BigInteger(buffer, isUnsigned: true, isBigEndian: true);
 
-        end.TryWriteBytes(buffer, out _);
+        if (!end.TryWriteBytes(buffer, out written) || written != buffer.Length)
+        {
+            throw new InvalidOperationException("couldn't write address bytes.");
+        }
 
-        var endInteger = new BigInteger(buffer, isBigEndian: true);
+        var endInteger = new BigInteger(buffer, isUnsigned: true, isBigEndian: true);
 
         if (endInteger < beginInteger)
         {

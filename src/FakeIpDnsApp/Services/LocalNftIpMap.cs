@@ -6,7 +6,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
-using FakeIpDnsApp.Extensions;
 
 namespace FakeIpDnsApp.Services;
 
@@ -60,7 +59,9 @@ public sealed class LocalNftIpMap : IIpMap
 
         await DeleteMappings(mappings.Select(x => x.Key));
 
-        if (!mappings.Select(x => x.Key.AddressFamily).Distinct().IsSingle())
+        var addressFamilies = mappings.Select(x => x.Key.AddressFamily).Distinct().ToArray();
+
+        if (addressFamilies.Length > 1)
         {
             var createIpv4Task = CreateMappingsAsync(true,
                 mappings.Where(x => x.Key.AddressFamily == AddressFamily.InterNetwork));
@@ -71,7 +72,7 @@ public sealed class LocalNftIpMap : IIpMap
             return;
         }
 
-        await CreateMappingsAsync(mappings.First().Key.AddressFamily == AddressFamily.InterNetwork, mappings);
+        await CreateMappingsAsync(addressFamilies[0] == AddressFamily.InterNetwork, mappings);
     }
 
     private Task DeleteMappings(IEnumerable<IPAddress> fake)
@@ -84,11 +85,18 @@ public sealed class LocalNftIpMap : IIpMap
         var psi = new ProcessStartInfo(NFT, GetDeleteArguments(fake))
         {
             RedirectStandardError = true,
-            RedirectStandardOutput = true,
         };
+
         using var deleteProcess = Process.Start(psi);
 
-        await deleteProcess!.WaitForExitAsync();
+        // stderr вычитывается до ожидания выхода: переполненный буфер pipe остановил бы nft,
+        // а WaitForExitAsync не вернулся бы никогда. Ошибку удаления не проверяем:
+        // удалить несуществующий элемент - штатная ситуация.
+        var errorTask = deleteProcess!.StandardError.ReadToEndAsync();
+
+        await deleteProcess.WaitForExitAsync(CancellationToken.None);
+
+        await errorTask;
     }
 
     private async Task CreateMappingsAsync(bool ipv4, IEnumerable<KeyValuePair<IPAddress, IPAddress>> mappings)
@@ -101,9 +109,13 @@ public sealed class LocalNftIpMap : IIpMap
 
         using var process = Process.Start(psi)!;
 
-        await process.WaitForExitAsync();
+        // stderr читается параллельно ожиданию: иначе длинное сообщение об ошибке заполняет буфер pipe,
+        // nft блокируется на записи, а WaitForExitAsync ждёт навсегда
+        var errorTask = process.StandardError.ReadToEndAsync();
 
-        var error = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync(CancellationToken.None);
+
+        var error = await errorTask;
 
         if (process.ExitCode != 0)
         {
